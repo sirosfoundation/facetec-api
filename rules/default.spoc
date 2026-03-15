@@ -1,0 +1,16 @@
+; facetec-api default scan acceptance rules — SPOCP advanced format
+; Each rule must be on a single line. Atoms do not use quotes.
+;
+; Numeric thresholds (min_liveness_score, min_face_match_level) are enforced in
+; code via policy config — rules here only address categorical attributes.
+; Query field order: doc-type, mrz-verified, nfc-verified, barcode-verified
+; Rules can stop at any field — trailing query fields beyond the rule length are ignored.
+
+; Accept passports with MRZ verification
+(facetec-scan (doc-type passport) (mrz-verified true))
+; Accept e-passports with both MRZ and NFC verification
+(facetec-scan (doc-type passport) (mrz-verified true) (nfc-verified true))
+; Accept driving licences with barcode verification
+(facetec-scan (doc-type dl) (mrz-verified false) (nfc-verified false) (barcode-verified true))
+; Accept national ID cards (minimal requirements — numeric thresholds apply)
+(facetec-scan (doc-type id_card))

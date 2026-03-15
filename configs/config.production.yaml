@@ -1,0 +1,42 @@
+## facetec-api PRODUCTION configuration template
+## Copy to config.yaml and fill in real values.
+## All secrets should be loaded from files (via *_path keys), not set inline.
+
+server:
+  host: "0.0.0.0"
+  port: 8443
+  tls:
+    enabled: true
+    cert_file: "/etc/facetec-api/tls.crt"
+    key_file:  "/etc/facetec-api/tls.key"
+
+facetec:
+  server_url: "https://facetec-server.example.org"
+  device_key_path: "/run/secrets/facetec_device_key"
+  timeout: "30s"
+
+issuer:
+  addr: "vc-issuer.internal:8090"
+  tls: true
+  ca_file:   "/etc/facetec-api/issuer-ca.crt"
+  cert_file: "/etc/facetec-api/client.crt"
+  key_file:  "/etc/facetec-api/client.key"
+  scope: "https://credentials.example.org/photo-id"
+  format: "sdjwt"
+
+policy:
+  rules_dir: "/etc/facetec-api/rules"
+
+session:
+  liveness_ttl: "2m"
+  offer_ttl: "5m"
+
+security:
+  app_key_path: "/run/secrets/app_key"
+  rate_limit:
+    enabled: true
+    requests_per_minute: 10
+
+logging:
+  level: "info"
+  production: true

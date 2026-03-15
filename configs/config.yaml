@@ -1,0 +1,74 @@
+## facetec-api development configuration
+## All values shown are the defaults; omit a key to use the default.
+## Environment variables (e.g. FACETEC_SERVER_URL) override file values.
+
+# ── HTTP server ───────────────────────────────────────────────────────────────
+server:
+  host: "0.0.0.0"
+  port: 8080
+
+  # TLS — disable for local development, always enable in production.
+  tls:
+    enabled: false
+    # cert_file: "/etc/facetec-api/tls.crt"
+    # key_file:  "/etc/facetec-api/tls.key"
+
+# ── FaceTec Server ────────────────────────────────────────────────────────────
+facetec:
+  # Base URL of the FaceTec Server REST API (required).
+  server_url: "https://facetec-server.example.org"
+
+  # SDK device key — set directly or load from a file (prefer file in production).
+  device_key: ""
+  # device_key_path: "/run/secrets/facetec_device_key"
+
+  # HTTP timeout for FaceTec Server requests.
+  timeout: "30s"
+
+# ── vc Credential Issuer (gRPC) ───────────────────────────────────────────────
+issuer:
+  # gRPC address of the vc issuer service (required).
+  addr: "localhost:8090"
+
+  # Disable TLS for local development only.
+  tls: false
+  # ca_file:   "/etc/facetec-api/issuer-ca.crt"
+  # cert_file: "/etc/facetec-api/client.crt"
+  # key_file:  "/etc/facetec-api/client.key"
+
+  # Credential scope URI — must match a scope configured in the vc issuer.
+  scope: "https://credentials.example.org/photo-id"
+
+  # Credential format: sdjwt (default), mdoc, or vc20.
+  format: "sdjwt"
+
+# ── SPOCP Policy ──────────────────────────────────────────────────────────────
+policy:
+  # Directory containing .spoc rule files loaded at startup.
+  rules_dir: "./rules"
+
+# ── Session (in-memory only, never persisted) ─────────────────────────────────
+session:
+  # How long a FaceMap is held between liveness and id-scan steps.
+  liveness_ttl: "2m"
+  # How long a credential offer is available for wallet redemption.
+  offer_ttl: "5m"
+
+# ── Security ──────────────────────────────────────────────────────────────────
+security:
+  # Pre-shared Bearer token required on all authenticated endpoints.
+  # Leave empty to DISABLE authentication (development only — never use in prod).
+  app_key: ""
+  # app_key_path: "/run/secrets/app_key"
+
+  # Per-IP rate limiting on biometric endpoints (POST /liveness, /id-scan, /session-token).
+  rate_limit:
+    enabled: true
+    requests_per_minute: 10
+
+# ── Logging ───────────────────────────────────────────────────────────────────
+logging:
+  # Log level: debug, info, warn, error
+  level: "info"
+  # Set true for JSON structured logging (recommended in production).
+  production: false

@@ -1,0 +1,20 @@
+# Build artifacts
+bin/
+coverage.out
+coverage.html
+
+# Go toolchain artifacts
+*.test
+*.prof
+*.trace
+
+# Local config with secrets — never bake into image
+configs/config.production.yaml
+secrets/
+
+# Development files
+.air.toml
+tmp/
+
+# OS
+.DS_Store
