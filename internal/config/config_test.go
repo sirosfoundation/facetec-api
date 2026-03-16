@@ -27,12 +27,6 @@ func TestLoad_Defaults(t *testing.T) {
 	if cfg.Issuer.Format != "sdjwt" {
 		t.Errorf("Issuer.Format: got %q, want sdjwt", cfg.Issuer.Format)
 	}
-	if cfg.Policy.MinLivenessScore != 80 {
-		t.Errorf("Policy.MinLivenessScore: got %d, want 80", cfg.Policy.MinLivenessScore)
-	}
-	if cfg.Policy.MinFaceMatchLevel != 6 {
-		t.Errorf("Policy.MinFaceMatchLevel: got %d, want 6", cfg.Policy.MinFaceMatchLevel)
-	}
 	if !cfg.Security.RateLimit.Enabled {
 		t.Error("Security.RateLimit.Enabled: want true by default")
 	}
@@ -56,8 +50,7 @@ issuer:
   scope: "photo-id"
   format: "mdoc"
 policy:
-  min_liveness_score: 90
-  min_face_match_level: 8
+  rules_dir: "/tmp/rules"
 `
 	path := writeTemp(t, "config.yaml", yaml)
 	cfg, err := config.Load(path)
@@ -79,11 +72,8 @@ policy:
 	if cfg.Issuer.Format != "mdoc" {
 		t.Errorf("Issuer.Format: got %q", cfg.Issuer.Format)
 	}
-	if cfg.Policy.MinLivenessScore != 90 {
-		t.Errorf("Policy.MinLivenessScore: got %d", cfg.Policy.MinLivenessScore)
-	}
-	if cfg.Policy.MinFaceMatchLevel != 8 {
-		t.Errorf("Policy.MinFaceMatchLevel: got %d", cfg.Policy.MinFaceMatchLevel)
+	if cfg.Policy.RulesDir != "/tmp/rules" {
+		t.Errorf("Policy.RulesDir: got %q", cfg.Policy.RulesDir)
 	}
 }
 
@@ -196,7 +186,49 @@ func TestValidate_ProductionWithoutAppKey(t *testing.T) {
 		Logging: config.LoggingConfig{Production: true},
 	}
 	if err := cfg.Validate(); err == nil {
-		t.Error("expected error: production mode without app_key")
+		t.Error("expected error: production mode without jwt.secret or app_key")
+	}
+}
+
+func TestValidate_ProductionWithJWTSecret(t *testing.T) {
+	cfg := &config.Config{
+		FaceTec: config.FaceTecConfig{ServerURL: "https://x", DeviceKey: "k"},
+		Issuer:  config.IssuerConfig{Addr: "x", Scope: "s"},
+		Logging: config.LoggingConfig{Production: true},
+		JWT:     config.JWTConfig{Secret: "shared-secret"},
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("unexpected error: jwt.secret set in production: %v", err)
+	}
+}
+
+func TestValidate_MultiTenantProductionRequiresJWT(t *testing.T) {
+	cfg := &config.Config{
+		FaceTec: config.FaceTecConfig{ServerURL: "https://x", DeviceKey: "k"},
+		Issuer:  config.IssuerConfig{Addr: "x", Scope: "s"},
+		Logging: config.LoggingConfig{Production: true},
+		Tenants: []config.TenantConfig{
+			{ID: "acme", Issuer: config.TenantIssuerConfig{Scope: "s"}},
+		},
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Error("expected error: multi-tenant production without jwt.secret")
+	}
+}
+
+func TestValidate_MultiTenantWithJWT(t *testing.T) {
+	cfg := &config.Config{
+		FaceTec: config.FaceTecConfig{ServerURL: "https://x", DeviceKey: "k"},
+		Issuer:  config.IssuerConfig{Addr: "x", Scope: "s"},
+		Logging: config.LoggingConfig{Production: true},
+		JWT:     config.JWTConfig{Secret: "shared-secret", Issuer: "https://auth.example.org"},
+		Tenants: []config.TenantConfig{
+			{ID: "acme", Issuer: config.TenantIssuerConfig{Scope: "s"}},
+			{ID: "gov", Policy: config.TenantPolicyConfig{}, Issuer: config.TenantIssuerConfig{Scope: "s2"}},
+		},
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("unexpected error: %v", err)
 	}
 }
 

@@ -1,16 +1,20 @@
 ; facetec-api default scan acceptance rules — SPOCP advanced format
-; Each rule must be on a single line. Atoms do not use quotes.
+; Each rule must be on a single line. Atoms are unquoted.
 ;
-; Numeric thresholds (min_liveness_score, min_face_match_level) are enforced in
-; code via policy config — rules here only address categorical attributes.
-; Query field order: doc-type, mrz-verified, nfc-verified, barcode-verified
-; Rules can stop at any field — trailing query fields beyond the rule length are ignored.
+; Numeric thresholds are encoded as SPOCP range predicates (* range numeric ...).
+; Liveness scores are 3-digit zero-padded integers (000-100).
+; Face match levels are 2-digit zero-padded integers (00-10).
+;
+; Field order: liveness-score, face-match-level, doc-type, mrz-verified,
+;              nfc-verified, barcode-verified
+; Rules may stop at any field — trailing query fields beyond the rule are ignored.
+;
+; Default thresholds: liveness >= 80, face-match >= 06.
+; To tighten or relax thresholds per deployment, edit these rules directly.
 
 ; Accept passports with MRZ verification
-(facetec-scan (doc-type passport) (mrz-verified true))
-; Accept e-passports with both MRZ and NFC verification
-(facetec-scan (doc-type passport) (mrz-verified true) (nfc-verified true))
+(facetec-scan (liveness-score (* range numeric ge 080)) (face-match-level (* range numeric ge 06)) (doc-type passport) (mrz-verified true))
 ; Accept driving licences with barcode verification
-(facetec-scan (doc-type dl) (mrz-verified false) (nfc-verified false) (barcode-verified true))
-; Accept national ID cards (minimal requirements — numeric thresholds apply)
-(facetec-scan (doc-type id_card))
+(facetec-scan (liveness-score (* range numeric ge 080)) (face-match-level (* range numeric ge 06)) (doc-type dl) (mrz-verified false) (nfc-verified false) (barcode-verified true))
+; Accept national ID cards
+(facetec-scan (liveness-score (* range numeric ge 080)) (face-match-level (* range numeric ge 06)) (doc-type id_card))

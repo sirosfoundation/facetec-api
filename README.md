@@ -4,11 +4,13 @@
 [![Coverage](https://codecov.io/gh/sirosfoundation/facetec-api/branch/main/graph/badge.svg)](https://codecov.io/gh/sirosfoundation/facetec-api)
 [![Go Report Card](https://goreportcard.com/badge/github.com/sirosfoundation/facetec-api)](https://goreportcard.com/report/github.com/sirosfoundation/facetec-api)
 [![Go](https://img.shields.io/badge/go-1.25-00ADD8?logo=go&logoColor=white)](https://go.dev/dl/)
-[![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
+[![License](https://img.shields.io/badge/license-BSD--2--Clause-blue)](LICENSE)
 [![Docker](https://img.shields.io/badge/registry-registry.siros.org-2496ED?logo=docker&logoColor=white)](https://registry.siros.org/sirosfoundation/facetec-api)
 
-A Go microservice that bridges the FaceTec biometric SDK (running on a mobile device) with a
-verifiable-credential (VC) issuer, enforcing configurable acceptance policy via SPOCP rules.
+A Go microservice that bridges the [FaceTec](https://www.facetec.com/) biometric SDK (running
+on a mobile device) with a verifiable-credential (VC) issuer. It acts as a security gateway:
+biometric liveness and photo-ID scan results are validated against configurable SPOCP policy,
+and — only on acceptance — a verifiable credential is issued through a gRPC back-end.
 
 ```
 Mobile SDK  →  facetec-api  →  FaceTec Server  (liveness + ID scan)
@@ -17,6 +19,9 @@ Mobile SDK  →  facetec-api  →  FaceTec Server  (liveness + ID scan)
                    │
                    └──  vc issuer (gRPC)  →  SD-JWT / mDoc / VC 2.0
 ```
+
+Biometric data (FaceMaps, raw scan images) **never leaves process memory** and is never written
+to disk. See [PRIVACY.md](PRIVACY.md) for a full data-flow and GDPR analysis.
 
 ## Quickstart
 
@@ -41,86 +46,143 @@ make run CONFIG=configs/config.local.yaml
 ## Configuration
 
 Configuration is loaded from a YAML file (default: `configs/config.yaml`) and can be overridden
-by environment variables prefixed `FACETEC_*`.
+by environment variables. The full annotated reference is [configs/config.yaml](configs/config.yaml).
 
-See [configs/config.yaml](configs/config.yaml) for a fully annotated reference. The table below
-lists the most important keys.
+### Core settings
 
-| YAML key | Environment variable | Default | Description |
-|----------|---------------------|---------|-------------|
+| YAML key | Env variable | Default | Description |
+|----------|-------------|---------|-------------|
 | `server.host` | `SERVER_HOST` | `0.0.0.0` | Listen address |
 | `server.port` | `SERVER_PORT` | `8080` | Listen port |
 | `server.public_base_url` | `SERVER_PUBLIC_BASE_URL` | *(empty)* | Externally reachable base URL; used for `credentialOfferURI` |
-| `server.tls.enabled` | `SERVER_TLS_ENABLED` | `false` | Enable TLS |
+| `server.tls.enabled` | `SERVER_TLS_ENABLED` | `false` | Enable TLS on the HTTP listener |
 | `facetec.server_url` | `FACETEC_SERVER_URL` | *(required)* | FaceTec Server base URL |
-| `facetec.device_key_path` | `FACETEC_DEVICE_KEY_PATH` | *(optional)* | File containing FaceTec device key |
-| `facetec.tls.ca_file` | `FACETEC_TLS_CA_FILE` | *(optional)* | CA certificate to trust for outbound FaceTec TLS |
-| `issuer.addr` | `ISSUER_ADDR` | *(required)* | gRPC address of the vc issuer |
-| `issuer.scope` | `ISSUER_SCOPE` | *(required)* | Credential scope |
-| `issuer.format` | `ISSUER_FORMAT` | `sdjwt` | Credential format: `sdjwt`, `mdoc`, `vc20` |
+| `facetec.device_key_path` | `FACETEC_DEVICE_KEY_PATH` | *(optional)* | File containing the FaceTec device key |
+| `facetec.tls.ca_file` | `FACETEC_TLS_CA_FILE` | *(optional)* | CA certificate for outbound FaceTec TLS |
+| `facetec.tls.skip_verify` | `FACETEC_TLS_SKIP_VERIFY` | `false` | Disable cert verification — **never use in production** |
+| `issuer.addr` | `ISSUER_ADDR` | *(required)* | gRPC address of the vc issuer (e.g. `issuer:8090`) |
+| `issuer.tls` | `ISSUER_TLS` | `false` | Enable TLS on the gRPC issuer connection |
+| `issuer.scope` | `ISSUER_SCOPE` | *(required)* | Default credential scope URI |
+| `issuer.format` | `ISSUER_FORMAT` | `sdjwt` | Default credential format: `sdjwt`, `mdoc`, `vc20` |
 | `policy.rules_dir` | `POLICY_RULES_DIR` | *(empty)* | Directory of `.spoc` rule files |
-| `policy.min_liveness_score` | `POLICY_MIN_LIVENESS_SCORE` | `80` | Minimum liveness score 0–100 |
-| `policy.min_face_match_level` | `POLICY_MIN_FACE_MATCH_LEVEL` | `6` | Minimum face-match level 0–10 |
-| `security.app_key_path` | `SECURITY_APP_KEY_PATH` | *(optional)* | File containing Bearer token for API auth |
+| `policy.min_liveness_score` | `POLICY_MIN_LIVENESS_SCORE` | `80` | Minimum liveness score (0–100) |
+| `policy.min_face_match_level` | `POLICY_MIN_FACE_MATCH_LEVEL` | `6` | Minimum face-match level (0–10) |
+| `session.liveness_ttl` | `SESSION_LIVENESS_TTL` | `2m` | How long a FaceMap is held in memory |
+| `session.offer_ttl` | `SESSION_OFFER_TTL` | `5m` | How long a credential offer is held in memory |
+| `logging.production` | `LOG_PRODUCTION` | `false` | Enable JSON structured logging (recommended in prod) |
+
+### Authentication
+
+Three modes are selected automatically based on which keys are present:
+
+| Mode | Config keys | Behaviour |
+|------|------------|-----------|
+| **JWT** *(recommended)* | `jwt.secret` | Validates HMAC-signed JWTs. The `tenant_id` claim selects the per-tenant policy; tokens without it use the `default` tenant. |
+| **Legacy Bearer** | `security.app_key` (no JWT secret) | Constant-time comparison of a raw token. Single-tenant only. |
+| **Dev / unauthenticated** | neither set | All requests are accepted. **Never use in production.** |
+
+JWT settings:
+
+| YAML key | Env variable | Default | Description |
+|----------|-------------|---------|-------------|
+| `jwt.secret` | `JWT_SECRET` | *(empty)* | HMAC shared secret for HS256/384/512 |
+| `jwt.secret_path` | `JWT_SECRET_PATH` | *(optional)* | File containing the JWT secret |
+| `jwt.issuer` | `JWT_ISSUER` | *(empty)* | Expected `iss` claim; leave empty to skip validation |
+| `jwt.require_auth` | `JWT_REQUIRE_AUTH` | `false` | Reject requests without a valid JWT |
+| `security.app_key_path` | `SECURITY_APP_KEY_PATH` | *(optional)* | File containing a legacy Bearer token |
 | `security.rate_limit.requests_per_minute` | `SECURITY_RATE_LIMIT_RPM` | `10` | Per-IP rate limit on biometric endpoints |
-| `logging.production` | `LOG_PRODUCTION` | `false` | Enable production JSON logging (requires `app_key`) |
+
+### Multi-tenant operation
+
+When no `tenants:` block is present, a single `default` tenant is synthesised from the global
+`policy` and `issuer` settings — existing deployments need no change.
+
+When the `tenants:` block is present, each tenant is selected by the `tenant_id` JWT claim. A
+missing or unconfigured `tenant_id` falls back to the `default` tenant (i.e., global settings),
+so onboarding new tenants incrementally is safe.
+
+Per-tenant overrides:
+
+```yaml
+tenants:
+  - id: acme                          # must match JWT tenant_id claim
+    issuer:
+      scope: "https://credentials.acme.example.org/photo-id"
+      format: sdjwt
+    policy:
+      rules_dir: "/etc/facetec-api/rules/acme"
+
+  - id: gov
+    issuer:
+      scope: "https://credentials.gov.example.org/id-document"
+      format: mdoc
+    policy:
+      rules_dir: "/etc/facetec-api/rules/gov"
+      min_liveness_score: 92        # overrides global; nil = inherit
+      min_face_match_level: 9
+```
 
 ## API
 
-All endpoints except `/livez` and `/readyz` require `Authorization: Bearer <app_key>` when
-`security.app_key` / `security.app_key_path` is configured.
+All `/v1/*` endpoints require a valid `Authorization: Bearer <token>` header when authentication
+is configured. `/livez` and `/readyz` are always unauthenticated.
 
 ### Probes (unauthenticated)
 
+| Method | Path | Response |
+|--------|------|---------|
+| `GET` | `/livez` | `200 {"status":"ok"}` — process is alive |
+| `GET` | `/readyz` | `200 {"status":"ok"}` when policy rules are loaded; `503` otherwise |
+
+### v1 API (authenticated)
+
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/livez` | Liveness probe — returns `200 {"status":"ok"}` if the process is running |
-| GET | `/readyz` | Readiness probe — returns `200` when policy rules are loaded and the service is operational |
-
-### v1 API
-
-| Method | Path | Description |
-|--------|------|-------------|
-| GET  | `/v1/health` | Service health |
-| POST | `/v1/session-token` | Obtain a FaceTec session token |
-| POST | `/v1/liveness` | Submit a liveness scan (FaceScan); returns `livenessSessionId` |
-| POST | `/v1/id-scan` | Submit a photo ID scan; returns `transactionId` + `credentialOfferURI` |
-| GET  | `/v1/offer/:txid` | Redeem a credential offer (one-time use) |
+| `GET`  | `/v1/health` | Returns `200 {"status":"ok"}` — useful as a credential smoke-test |
+| `POST` | `/v1/session-token` | Obtain a short-lived FaceTec session token |
+| `POST` | `/v1/liveness` | Submit a liveness FaceScan; returns `livenessSessionId` |
+| `POST` | `/v1/id-scan` | Submit a photo ID scan; returns `transactionId` + `credentialOfferURI` |
+| `GET`  | `/v1/offer/:txid` | Redeem a one-time credential offer (wallet pull) |
 
 ### Biometric flow
 
 ```
-1. POST /v1/session-token           → { sessionToken }
-2. POST /v1/liveness                → { livenessSessionId }
-   body: { sessionToken, faceScan, [auditTrail] }
-3. POST /v1/id-scan                 → { transactionId, credentialOfferURI }
-   body: { sessionToken, livenessSessionId, idScan, [...] }
-4. GET  /v1/offer/:transactionId    → { credentials, scope }
-   (wallet polls until offer is available)
+1. POST /v1/session-token
+   ← { "sessionToken": "…" }
+
+2. POST /v1/liveness
+   → { "sessionToken": "…", "faceScan": "<base64>", "auditTrail": […] }
+   ← { "livenessSessionId": "…" }
+
+3. POST /v1/id-scan
+   → { "sessionToken": "…", "livenessSessionId": "…", "idScan": "<base64>",
+       "idScanFrontImagesCompressedBase64": […], … }
+   ← { "transactionId": "…", "credentialOfferURI": "openid-credential-offer://…" }
+
+4. GET /v1/offer/:transactionId
+   ← { "credentials": ["<signed-token>"], "scope": "…" }
 ```
+
+Steps 2 and 3 are independently rate-limited per source IP.
 
 ## SPOCP Policy Rules
 
 Scan acceptance is a two-stage process:
 
-1. **Numeric thresholds** (enforced in code via config): `policy.min_liveness_score` and
-   `policy.min_face_match_level` — fast, explicit comparisons that cannot be bypassed.
-2. **Categorical SPOCP rules** (loaded from `.spoc` files): encode which combinations of
-   document type and verification flags are acceptable.
+1. **Numeric thresholds** (`policy.min_liveness_score`, `policy.min_face_match_level`) — hard
+   limits enforced in code; cannot be overridden by rules.
+2. **Categorical SPOCP rules** (`.spoc` files in `policy.rules_dir`) — S-expressions that encode
+   which combinations of document type and verification flags are acceptable.
 
-Rules are loaded from `policy.rules_dir` at startup. Each rule is an S-expression in SPOCP
-advanced format. Add the directory to [`configs/config.yaml`](configs/config.yaml) and place
-`.spoc` files inside.
+Rules are loaded at startup (and re-loaded on SIGHUP). If the rules directory is empty or
+`policy.rules_dir` is unset, the service starts but rejects all scans and reports not-ready.
 
 ```scheme
 ; rules/default.spoc
-; Numeric thresholds (min_liveness_score, min_face_match_level) are enforced in
-; config — rules only address document type and verification flags.
-
 ; Accept passports with MRZ verification.
 (facetec-scan (doc-type passport) (mrz-verified true))
 
-; Accept e-passports with both MRZ and NFC chip verification.
+; Accept e-passports with NFC chip verification.
 (facetec-scan (doc-type passport) (mrz-verified true) (nfc-verified true))
 
 ; Accept driving licences with barcode verification.
@@ -130,7 +192,7 @@ advanced format. Add the directory to [`configs/config.yaml`](configs/config.yam
 (facetec-scan (doc-type id_card))
 ```
 
-Categorical query fields (always present in every query):
+Query fields available in every SPOCP query:
 
 | Field | Values |
 |-------|--------|
@@ -141,23 +203,27 @@ Categorical query fields (always present in every query):
 
 ## Security
 
-- **Biometric data never touches disk.** FaceMap templates are held only in process memory for
-  the duration of the liveness→id-scan window (default 2 minutes); the backing bytes are zeroed
-  with `clear()` immediately after use and on service shutdown.
-- **MRZ lines stripped before forwarding.** Raw MRZ lines encode the full identity in
-  machine-readable form; they are removed before the document data is sent to the VC issuer.
-- **No request/response body logging.** Gin runs in `gin.New()` mode with explicit middleware;
-  the panic recovery handler is wired to `nil` to suppress recovery dumps.
-- **Structured log scrubbing.** `RequestLogger` records only method, path, status, latency,
-  client IP, and user agent — never headers or bodies.
-- **Constant-time auth.** `AppKeyAuth` uses `subtle.ConstantTimeCompare` to prevent timing attacks.
-- **Rate limiting.** Biometric endpoints are rate-limited per source IP (default 10 rpm) with
-  a background goroutine that evicts stale IP buckets every 5 minutes.
-- **Security response headers.** All responses carry `X-Content-Type-Options: nosniff`,
-  `X-Frame-Options: DENY`, and `Cache-Control: no-store`.
+- **Biometric data never touches disk.** FaceMap templates are held exclusively in process
+  memory for the duration of the liveness→id-scan window (default 2 min); backing bytes are
+  zeroed with `clear()` immediately after use and again on graceful shutdown.
+- **MRZ lines stripped before forwarding.** Raw MRZ lines (encoding the full identity in
+  machine-readable form) are removed before any data is sent to the VC issuer.
+- **No request/response body logging.** Gin runs in `gin.New()` mode; the panic-recovery handler
+  is bound to `nil` to suppress recovery body dumps. `RequestLogger` records only method, path,
+  status, latency, client IP, and user agent.
+- **JWT authentication** with HMAC HS256/384/512; signing method is explicitly validated to
+  prevent algorithm-confusion attacks. Legacy Bearer fallback uses constant-time comparison.
+- **Rate limiting.** Biometric endpoints are rate-limited per source IP (default 10 rpm); stale
+  IP buckets are evicted every 5 minutes to prevent unbounded memory growth.
+- **Security response headers.** `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`,
+  `Cache-Control: no-store` on every response.
 - **HTTP timeouts.** `ReadHeaderTimeout: 10s`, `WriteTimeout: 90s`, `IdleTimeout: 120s`.
-- **Production safety guard.** `logging.production: true` requires `security.app_key` to be
-  set; the service will refuse to start without it.
+- **Production safety guard.** With `logging.production: true`, startup fails unless at least
+  one of `jwt.secret` or `security.app_key` is set.
+- **Atomic SIGHUP reload.** The tenant registry is swapped atomically on SIGHUP; in-flight
+  requests are unaffected.
+
+See [PRIVACY.md](PRIVACY.md) for a full data-flow description and GDPR analysis.
 
 ## Development
 
@@ -165,7 +231,7 @@ Categorical query fields (always present in every query):
 make tools          # install golangci-lint, protoc plugins
 make dev            # build and run with hot config reload
 make test           # run all tests
-make test-coverage  # run tests with per-function coverage report + HTML
+make test-coverage  # run tests with coverage profile + HTML report
 make lint           # run golangci-lint
 make fmt            # gofmt
 make vet            # go vet

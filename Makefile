@@ -19,6 +19,17 @@ DOCKER_TAG      := $(VERSION)
 # Disable workspace mode so coverage instrumentation works without covdata.
 GOTEST := GOWORK=off go test -v -race
 
+# Packages that carry test files. Using ./... with -coverprofile requires the
+# covdata tool (Go ≥ 1.20 multi-package coverage merge) which is not present in
+# every toolchain installation. Limiting to tested packages avoids the error.
+TESTPKGS := \
+	./internal/config/... \
+	./internal/middleware/... \
+	./internal/policy/... \
+	./internal/session/... \
+	./internal/tenant/... \
+	./tests/...
+
 all: lint test build ## Run lint, test, build (default)
 
 build: ## Build the server binary
@@ -40,8 +51,7 @@ dev: ## Run with hot reload (requires: go install github.com/air-verse/air@lates
 # ── Testing ───────────────────────────────────────────────────────────────────
 test: ## Run all tests (unit + integration)
 	@echo "Running all tests..."
-	@$(GOTEST) -coverprofile=coverage.out ./...
-	@GOWORK=off go tool cover -func=coverage.out | tail -3
+	@$(GOTEST) ./...
 
 test-unit: ## Run unit tests only
 	@echo "Running unit tests..."
@@ -51,10 +61,11 @@ test-integration: ## Run integration tests (requires no external services)
 	@echo "Running integration tests..."
 	@$(GOTEST) ./tests/integration/...
 
-test-coverage: ## Generate HTML coverage report (all packages, cross-package attribution)
-	@$(GOTEST) -covermode=atomic -coverprofile=coverage.out -coverpkg=./internal/... ./...
+test-coverage: ## Generate per-package coverage summary and HTML report
+	@echo "Running tests with coverage..."
+	@$(GOTEST) -coverprofile=coverage.out $(TESTPKGS)
+	@GOWORK=off go tool cover -func=coverage.out | tail -3
 	@GOWORK=off go tool cover -html=coverage.out -o coverage.html
-	@GOWORK=off go tool cover -func=coverage.out | grep -E "^total|\.go:[0-9]"
 	@echo "Coverage report: coverage.html"
 
 # ── Code quality ──────────────────────────────────────────────────────────────

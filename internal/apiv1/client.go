@@ -1,6 +1,17 @@
 // Package apiv1 contains the business logic for facetec-api.
-// It orchestrates the FaceTec client, SPOCP policy engine, session manager,
-// and vc gRPC issuer client.
+//
+// It orchestrates four components:
+//
+//  1. FaceTec Server client — forwards liveness and ID scan requests.
+//  2. Tenant registry ([tenant.Registry]) — resolves per-tenant policy engines
+//     and issuer parameters from the JWT tenant_id claim on the request context.
+//  3. SPOCP policy engine (per tenant) — evaluates each scan result against
+//     numeric thresholds and categorical rules before issuing a credential.
+//  4. VC issuer gRPC client — issues the signed credential once policy passes.
+//
+// All biometric data (FaceMap templates, raw scan images) is held exclusively
+// in an in-memory session store ([session.Manager]) and is never written to disk.
+// FaceMap bytes are explicitly zeroed with clear() after use and on shutdown.
 package apiv1
 
 import (
@@ -17,8 +28,8 @@ import (
 	"github.com/sirosfoundation/facetec-api/internal/config"
 	"github.com/sirosfoundation/facetec-api/internal/facetec"
 	"github.com/sirosfoundation/facetec-api/internal/issuerclient"
-	"github.com/sirosfoundation/facetec-api/internal/policy"
 	"github.com/sirosfoundation/facetec-api/internal/session"
+	"github.com/sirosfoundation/facetec-api/internal/tenant"
 )
 
 // Client is the central business logic component for facetec-api.
@@ -26,13 +37,14 @@ type Client struct {
 	cfg      *config.Config
 	log      *zap.Logger
 	ft       *facetec.Client
-	pol      *policy.Engine
+	tenants  *tenant.Registry
 	sessions *session.Manager
 	issuer   *issuerclient.Client
 }
 
 // New constructs a Client, wiring up all dependencies.
-func New(_ context.Context, cfg *config.Config, log *zap.Logger) (*Client, error) {
+// registry provides per-tenant policy engines and issuer parameters.
+func New(_ context.Context, cfg *config.Config, registry *tenant.Registry, log *zap.Logger) (*Client, error) {
 	ftHTTPClient, err := buildFaceTecHTTPClient(cfg.FaceTec)
 	if err != nil {
 		return nil, fmt.Errorf("apiv1: configure facetec HTTP client: %w", err)
@@ -42,19 +54,6 @@ func New(_ context.Context, cfg *config.Config, log *zap.Logger) (*Client, error
 		cfg.FaceTec.DeviceKey,
 		ftHTTPClient,
 	)
-
-	pol, err := policy.New(cfg.Policy.RulesDir, cfg.Policy.MinLivenessScore, cfg.Policy.MinFaceMatchLevel)
-	if err != nil {
-		return nil, fmt.Errorf("apiv1: init policy engine: %w", err)
-	}
-	log.Info("policy engine ready",
-		zap.Int("rules", pol.RuleCount()),
-		zap.Int("min_liveness_score", cfg.Policy.MinLivenessScore),
-		zap.Int("min_face_match_level", cfg.Policy.MinFaceMatchLevel),
-	)
-	if pol.RuleCount() == 0 {
-		log.Warn("policy engine has no rules — all scans will be rejected; set policy.rules_dir in config")
-	}
 
 	ses := session.New(cfg.Session.LivenessTTL, cfg.Session.OfferTTL)
 
@@ -75,7 +74,7 @@ func New(_ context.Context, cfg *config.Config, log *zap.Logger) (*Client, error
 		cfg:      cfg,
 		log:      log,
 		ft:       ft,
-		pol:      pol,
+		tenants:  registry,
 		sessions: ses,
 		issuer:   issuer,
 	}, nil
@@ -155,25 +154,32 @@ func (c *Client) SubmitIDScan(ctx context.Context, livenessSessionID string, idS
 		IDScan: *idScanResult,
 	}
 
-	if err := c.pol.EvaluateScan(scanResult); err != nil {
-		c.log.Debug("scan rejected by policy", // P5: behavioral attributes at Debug, not Info
+	tc, ok := tenant.FromStdContext(ctx)
+	if !ok {
+		return "", fmt.Errorf("id-scan: tenant context missing from request")
+	}
+
+	if err := tc.Policy.EvaluateScan(scanResult); err != nil {
+		c.log.Debug("scan rejected by policy",
+			zap.String("tenant", tc.ID),
 			zap.String("doc_type", idScanResult.DocumentData.DocumentType),
 			zap.Int("face_match_level", idScanResult.FaceMatchLevel),
 		)
 		return "", fmt.Errorf("id-scan: %w", err)
 	}
 
-	txID, err := c.issueCredential(ctx, scanResult)
+	txID, err := c.issueCredential(ctx, scanResult, tc.Issuer)
 	if err != nil {
 		return "", fmt.Errorf("id-scan: issue credential: %w", err)
 	}
 
 	// P6: structured audit record — no biometric or PII fields.
 	c.log.Info("AUDIT credential_issued",
+		zap.String("tenant", tc.ID),
 		zap.String("transaction_id", txID),
 		zap.String("doc_type", idScanResult.DocumentData.DocumentType),
-		zap.String("format", c.cfg.Issuer.Format),
-		zap.String("scope", c.cfg.Issuer.Scope),
+		zap.String("format", tc.Issuer.Format),
+		zap.String("scope", tc.Issuer.Scope),
 	)
 	return txID, nil
 }
@@ -198,8 +204,8 @@ func (c *Client) Close(_ context.Context) error {
 // Ready returns nil if the service is fully operational.
 // Currently checks that the policy engine has at least one rule loaded.
 func (c *Client) Ready() error {
-	if c.pol.RuleCount() == 0 {
-		return fmt.Errorf("policy engine has no rules loaded")
+	if empty := c.tenants.EmptyPolicies(); len(empty) > 0 {
+		return fmt.Errorf("tenants with no policy rules loaded: %v", empty)
 	}
 	return nil
 }
@@ -208,7 +214,7 @@ func (c *Client) Ready() error {
 // stores the resulting signed credential in the session manager.
 // P2: raw MRZ lines are stripped before forwarding — they encode the full identity
 // in machine-readable form and must not leave this service.
-func (c *Client) issueCredential(ctx context.Context, result facetec.ScanResult) (string, error) {
+func (c *Client) issueCredential(ctx context.Context, result facetec.ScanResult, issuer tenant.IssuerParams) (string, error) {
 	// Strip raw MRZ lines — they duplicate all identity fields in a parseable format.
 	docData := result.IDScan.DocumentData
 	docData.MRZLine1 = ""
@@ -222,10 +228,10 @@ func (c *Client) issueCredential(ctx context.Context, result facetec.ScanResult)
 
 	var credentials []string
 
-	switch c.cfg.Issuer.Format {
+	switch issuer.Format {
 	case "mdoc":
 		resp, err := c.issuer.MakeMDoc(ctx, issuerclient.MakeMDocRequest{
-			Scope:        c.cfg.Issuer.Scope,
+			Scope:        issuer.Scope,
 			DocType:      "org.iso.18013.5.1.mDL",
 			DocumentData: data,
 		})
@@ -236,7 +242,7 @@ func (c *Client) issueCredential(ctx context.Context, result facetec.ScanResult)
 
 	case "vc20":
 		resp, err := c.issuer.MakeVC20(ctx, issuerclient.MakeVC20Request{
-			Scope:        c.cfg.Issuer.Scope,
+			Scope:        issuer.Scope,
 			DocumentData: data,
 		})
 		if err != nil {
@@ -246,7 +252,7 @@ func (c *Client) issueCredential(ctx context.Context, result facetec.ScanResult)
 
 	default: // sdjwt
 		resp, err := c.issuer.MakeSDJWT(ctx, issuerclient.MakeSDJWTRequest{
-			Scope:        c.cfg.Issuer.Scope,
+			Scope:        issuer.Scope,
 			DocumentData: data,
 		})
 		if err != nil {
@@ -255,7 +261,7 @@ func (c *Client) issueCredential(ctx context.Context, result facetec.ScanResult)
 		credentials = resp.Credentials
 	}
 
-	return c.sessions.PutOffer(credentials, c.cfg.Issuer.Scope)
+	return c.sessions.PutOffer(credentials, issuer.Scope)
 }
 
 // buildFaceTecHTTPClient constructs an *http.Client with the TLS configuration

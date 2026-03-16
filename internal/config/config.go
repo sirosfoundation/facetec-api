@@ -21,6 +21,14 @@ type Config struct {
 	Session  SessionConfig  `yaml:"session"`
 	Security SecurityConfig `yaml:"security"`
 	Logging  LoggingConfig  `yaml:"logging"`
+	// JWT holds the shared JWT validation settings for all tenant authentication.
+	// All tenants use the same secret and issuer; the tenant_id claim selects the tenant.
+	JWT      JWTConfig      `yaml:"jwt"`
+	// Tenants defines per-tenant policy and issuer overrides.
+	// When empty, a single "default" tenant is synthesised from the global
+	// security.app_key and policy/issuer settings (backward-compatible mode).
+	// envconfig is not applied to this slice — configure tenants via YAML only.
+	Tenants  []TenantConfig `yaml:"tenants" envconfig:"-"`
 }
 
 // ServerConfig controls the HTTP listener.
@@ -81,14 +89,10 @@ type IssuerConfig struct {
 }
 
 // PolicyConfig points to the directory of .spoc rule files.
+// Numeric acceptance thresholds (liveness score, face match level) are encoded
+// directly in the rules via SPOCP range predicates rather than as config fields.
 type PolicyConfig struct {
 	RulesDir string `yaml:"rules_dir" envconfig:"POLICY_RULES_DIR"`
-	// MinLivenessScore is the minimum acceptable liveness score (0–100).
-	// Scans with a lower score are rejected before SPOCP rule evaluation.
-	MinLivenessScore int `yaml:"min_liveness_score"  envconfig:"POLICY_MIN_LIVENESS_SCORE"`
-	// MinFaceMatchLevel is the minimum acceptable face match level (0–10).
-	// Scans with a lower level are rejected before SPOCP rule evaluation.
-	MinFaceMatchLevel int `yaml:"min_face_match_level" envconfig:"POLICY_MIN_FACE_MATCH_LEVEL"`
 }
 
 // SecurityConfig controls request authentication and rate limiting.
@@ -115,6 +119,53 @@ type SessionConfig struct {
 	LivenessTTL time.Duration `yaml:"liveness_ttl" envconfig:"SESSION_LIVENESS_TTL"`
 	// OfferTTL is how long a credential offer is retained before redemption.
 	OfferTTL    time.Duration `yaml:"offer_ttl"    envconfig:"SESSION_OFFER_TTL"`
+}
+
+// TenantPolicyConfig holds optional per-tenant policy overrides.
+type TenantPolicyConfig struct {
+	// RulesDir overrides the global policy.rules_dir for this tenant.
+	// If empty, the global rules directory is used.
+	RulesDir string `yaml:"rules_dir"`
+}
+
+// TenantIssuerConfig holds per-tenant issuer parameter overrides.
+// Empty strings fall back to the global IssuerConfig values.
+type TenantIssuerConfig struct {
+	// Scope overrides the global issuer.scope for this tenant.
+	Scope string `yaml:"scope"`
+	// Format overrides the global issuer.format (sdjwt | mdoc | vc20).
+	Format string `yaml:"format"`
+}
+
+// TenantConfig defines a single tenant's policy and issuer overrides.
+// Authentication is handled centrally via the shared jwt: config block;
+// the tenant_id claim in the validated JWT selects which TenantConfig applies.
+type TenantConfig struct {
+	// ID is a unique human-readable identifier that must match the JWT tenant_id claim.
+	ID string `yaml:"id"`
+	// Policy holds optional per-tenant SPOCP rule and threshold overrides.
+	Policy TenantPolicyConfig `yaml:"policy"`
+	// Issuer holds optional per-tenant credential scope and format overrides.
+	Issuer TenantIssuerConfig `yaml:"issuer"`
+}
+
+// JWTConfig holds the shared JWT validation settings used for all tenants.
+// All tenants are authenticated using the same JWT infrastructure; the
+// tenant_id claim in the token selects which policy engine and issuer
+// parameters apply to the request.
+type JWTConfig struct {
+	// Secret is the HMAC shared secret used to validate JWT signatures.
+	// Use SecretPath in production to avoid storing secrets in config files.
+	Secret string `yaml:"secret" envconfig:"JWT_SECRET"`
+	// SecretPath loads Secret from a file (takes precedence over Secret).
+	SecretPath string `yaml:"secret_path" envconfig:"JWT_SECRET_PATH"`
+	// Issuer is the expected iss claim. When non-empty, tokens with a different
+	// issuer are rejected.
+	Issuer string `yaml:"issuer" envconfig:"JWT_ISSUER"`
+	// RequireAuth, when true, rejects requests that carry no valid Bearer JWT.
+	// When false (default), unauthenticated requests receive the default tenant
+	// context — suitable for development and gradual rollout.
+	RequireAuth bool `yaml:"require_auth" envconfig:"JWT_REQUIRE_AUTH"`
 }
 
 // LoggingConfig controls log output.
@@ -157,11 +208,37 @@ func (c *Config) Validate() error {
 	if c.Issuer.Addr == "" {
 		return fmt.Errorf("config: issuer.addr is required")
 	}
-	if c.Issuer.Scope == "" {
-		return fmt.Errorf("config: issuer.scope is required")
-	}
-	if c.Logging.Production && c.Security.AppKey == "" {
-		return fmt.Errorf("config: security.app_key / security.app_key_path is required when logging.production is true")
+
+	if len(c.Tenants) == 0 {
+		// Single-tenant mode: issuer scope must be set globally.
+		if c.Issuer.Scope == "" {
+			return fmt.Errorf("config: issuer.scope is required (or define per-tenant in the tenants: block)")
+		}
+		// In production, require at least one auth mechanism.
+		if c.Logging.Production && c.Security.AppKey == "" && c.JWT.Secret == "" {
+			return fmt.Errorf("config: jwt.secret (or legacy security.app_key) is required in production")
+		}
+	} else {
+		// Multi-tenant mode: JWT is the only supported auth mechanism.
+		// Plain per-tenant app keys are not supported — use jwt.secret.
+		if c.JWT.Secret == "" && c.Logging.Production {
+			return fmt.Errorf("config: jwt.secret is required in production multi-tenant mode")
+		}
+		// Validate each tenant entry.
+		ids := make(map[string]bool, len(c.Tenants))
+		for i, t := range c.Tenants {
+			if t.ID == "" {
+				return fmt.Errorf("config: tenants[%d]: id is required", i)
+			}
+			if ids[t.ID] {
+				return fmt.Errorf("config: tenants[%d]: id %q is duplicated", i, t.ID)
+			}
+			ids[t.ID] = true
+			// Every tenant must have a resolvable issuer scope.
+			if t.Issuer.Scope == "" && c.Issuer.Scope == "" {
+				return fmt.Errorf("config: tenant %q: issuer.scope is required (not set in tenant or global config)", t.ID)
+			}
+		}
 	}
 	return nil
 }
@@ -186,6 +263,13 @@ func (c *Config) loadSecrets() error {
 		}
 		c.Security.AppKey = strings.TrimSpace(string(data))
 	}
+	if c.JWT.SecretPath != "" {
+		data, err := os.ReadFile(c.JWT.SecretPath)
+		if err != nil {
+			return fmt.Errorf("config: read jwt.secret_path: %w", err)
+		}
+		c.JWT.Secret = strings.TrimSpace(string(data))
+	}
 	return nil
 }
 
@@ -200,10 +284,6 @@ func defaultConfig() *Config {
 		},
 		Issuer: IssuerConfig{
 			Format: "sdjwt",
-		},
-		Policy: PolicyConfig{
-			MinLivenessScore:  80,
-			MinFaceMatchLevel: 6,
 		},
 		Session: SessionConfig{
 			LivenessTTL: 2 * time.Minute,

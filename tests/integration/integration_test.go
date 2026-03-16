@@ -22,6 +22,7 @@ import (
 	"github.com/sirosfoundation/facetec-api/internal/facetec"
 	"github.com/sirosfoundation/facetec-api/internal/httpserver"
 	"github.com/sirosfoundation/facetec-api/internal/session"
+	"github.com/sirosfoundation/facetec-api/internal/tenant"
 )
 
 // ----------------------------------------------------------------------------
@@ -136,7 +137,11 @@ func newTestServer(t *testing.T, stub *stubApiv1, appKey string) *httptest.Serve
 	t.Helper()
 	log := zap.NewNop()
 	cfg := testConfig(appKey, false)
-	svc := httpserver.New(context.Background(), cfg, stub, log)
+	reg, err := tenant.NewRegistry(cfg, log)
+	if err != nil {
+		t.Fatalf("NewRegistry: %v", err)
+	}
+	svc := httpserver.New(context.Background(), cfg, stub, reg, log)
 	ts := httptest.NewServer(svc.Handler())
 	t.Cleanup(ts.Close)
 	return ts
@@ -146,7 +151,11 @@ func newTestServerWithRateLimit(t *testing.T, stub *stubApiv1, appKey string) *h
 	t.Helper()
 	log := zap.NewNop()
 	cfg := testConfig(appKey, true)
-	svc := httpserver.New(context.Background(), cfg, stub, log)
+	reg, err := tenant.NewRegistry(cfg, log)
+	if err != nil {
+		t.Fatalf("NewRegistry: %v", err)
+	}
+	svc := httpserver.New(context.Background(), cfg, stub, reg, log)
 	ts := httptest.NewServer(svc.Handler())
 	t.Cleanup(ts.Close)
 	return ts

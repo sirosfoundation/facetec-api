@@ -11,6 +11,7 @@ import (
 
 	"github.com/sirosfoundation/facetec-api/internal/config"
 	"github.com/sirosfoundation/facetec-api/internal/middleware"
+	"github.com/sirosfoundation/facetec-api/internal/tenant"
 )
 
 // Service is the HTTP server for facetec-api.
@@ -23,7 +24,8 @@ type Service struct {
 }
 
 // New creates and configures the HTTP service but does not start listening.
-func New(_ context.Context, cfg *config.Config, apiv1 Apiv1, log *zap.Logger) *Service {
+// registry is used to resolve Bearer tokens to tenant contexts on every request.
+func New(_ context.Context, cfg *config.Config, apiv1 Apiv1, registry *tenant.Registry, log *zap.Logger) *Service {
 	if cfg.Logging.Production {
 		gin.SetMode(gin.ReleaseMode)
 	}
@@ -38,7 +40,7 @@ func New(_ context.Context, cfg *config.Config, apiv1 Apiv1, log *zap.Logger) *S
 	)
 
 	svc := &Service{cfg: cfg, log: log, apiv1: apiv1, router: router}
-	svc.registerRoutes(router)
+	svc.registerRoutes(router, registry)
 
 	svc.server = &http.Server{
 		Addr:              cfg.Server.Address(),
@@ -78,13 +80,13 @@ func (s *Service) Close(ctx context.Context) error {
 	return s.server.Shutdown(ctx)
 }
 
-func (s *Service) registerRoutes(r *gin.Engine) {
+func (s *Service) registerRoutes(r *gin.Engine, registry *tenant.Registry) {
 	// Unauthenticated probes — always accessible.
 	r.GET("/livez", s.endpointLivez)
 	r.GET("/readyz", s.endpointReadyz)
 
 	// Versioned API — authentication + rate limiting applied to all routes.
-	auth := middleware.AppKeyAuth(&s.cfg.Security, s.log)
+	auth := middleware.TenantAuth(registry, s.cfg, s.log)
 	rl := middleware.RateLimit(&s.cfg.Security, s.log)
 
 	v1 := r.Group("/v1", auth)

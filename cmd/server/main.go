@@ -14,6 +14,7 @@ import (
 	"github.com/sirosfoundation/facetec-api/internal/apiv1"
 	"github.com/sirosfoundation/facetec-api/internal/config"
 	"github.com/sirosfoundation/facetec-api/internal/httpserver"
+	"github.com/sirosfoundation/facetec-api/internal/tenant"
 )
 
 // Version and Commit are set at build time via -ldflags.
@@ -62,12 +63,41 @@ func main() {
 
 	ctx := context.Background()
 
-	apiv1Client, err := apiv1.New(ctx, cfg, log)
+	registry, err := tenant.NewRegistry(cfg, log)
+	if err != nil {
+		log.Fatal("failed to build tenant registry", zap.Error(err))
+	}
+
+	// Hot-reload tenant registry on SIGHUP without restarting the process.
+	// Validation failures leave the current registry intact.
+	sighup := make(chan os.Signal, 1)
+	signal.Notify(sighup, syscall.SIGHUP)
+	go func() {
+		for range sighup {
+			log.Info("SIGHUP received — reloading configuration")
+			newCfg, err := config.Load(configFile)
+			if err != nil {
+				log.Warn("hot-reload: failed to load config", zap.Error(err))
+				continue
+			}
+			if err := newCfg.Validate(); err != nil {
+				log.Warn("hot-reload: invalid config", zap.Error(err))
+				continue
+			}
+			if err := registry.Reload(newCfg, log); err != nil {
+				log.Warn("hot-reload: failed to reload tenant registry", zap.Error(err))
+				continue
+			}
+			log.Info("hot-reload: tenant registry reloaded successfully")
+		}
+	}()
+
+	apiv1Client, err := apiv1.New(ctx, cfg, registry, log)
 	if err != nil {
 		log.Fatal("failed to initialise apiv1", zap.Error(err))
 	}
 
-	httpSvc := httpserver.New(ctx, cfg, apiv1Client, log)
+	httpSvc := httpserver.New(ctx, cfg, apiv1Client, registry, log)
 
 	// namedService pairs a service with a human-readable name for log messages.
 	type namedService struct {

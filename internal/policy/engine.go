@@ -1,17 +1,18 @@
 // Package policy wraps the go-spocp engine for scan acceptance decisions.
 //
-// Scan results are evaluated in two stages:
-//  1. Numeric threshold checks (min_liveness_score, min_face_match_level) —
-//     explicit, auditable comparisons that operators configure in policy config.
-//  2. Categorical SPOCP check — rules in the .spoc file encode which combinations
-//     of document type and verification flags are acceptable.
+// Scan results are evaluated entirely by SPOCP rules loaded from .spoc files.
+// Rules encode both numeric thresholds (via star-form range predicates) and
+// categorical constraints (document type, verification flags) in a single rule.
 //
-// Separating numeric and categorical checks avoids the need to enumerate every
-// possible liveness score value in SPOCP rules (SPOCP atom matching is exact).
+// Numeric values in queries are formatted as zero-padded fixed-width integers
+// so that lexicographic comparison matches numeric order:
+//   - liveness-score: 3-digit (000–100)
+//   - face-match-level: 2-digit (00–10)
+//
 // Example rule file (advanced format, one rule per line, no quotes):
 //
-//	; Accept passports with MRZ verification
-//	(facetec-scan (doc-type passport) (mrz-verified true))
+//	; Accept passports — liveness >= 80, face-match >= 6, MRZ verified
+//	(facetec-scan (liveness-score (* range numeric ge 080)) (face-match-level (* range numeric ge 06)) (doc-type passport) (mrz-verified true))
 package policy
 
 import (
@@ -28,17 +29,15 @@ import (
 
 // Engine wraps a go-spocp Engine for scan policy evaluation.
 type Engine struct {
-	engine            *spocp.Engine
-	minLivenessScore  int // 0–100; scans below this are rejected before SPOCP
-	minFaceMatchLevel int // 0–10;  scans below this are rejected before SPOCP
+	engine *spocp.Engine
 }
 
 // New creates a policy Engine and loads all .spoc rule files from rulesDir.
 // Rule files must use SPOCP advanced (human-readable) format, one rule per line.
-// minLivenessScore (0–100) and minFaceMatchLevel (0–10) are enforced before SPOCP;
-// rules in the .spoc files only need to address categorical fields (doc-type,
-// verification flags). If rulesDir is empty the engine starts with no rules.
-func New(rulesDir string, minLivenessScore, minFaceMatchLevel int) (*Engine, error) {
+// Star-form elements parsed from file (e.g. range predicates) are reconstructed
+// into proper starform types so the comparison engine handles them correctly.
+// If rulesDir is empty the engine starts with no rules.
+func New(rulesDir string) (*Engine, error) {
 	e := spocp.NewEngine()
 	if rulesDir != "" {
 		entries, err := os.ReadDir(rulesDir)
@@ -55,35 +54,26 @@ func New(rulesDir string, minLivenessScore, minFaceMatchLevel int) (*Engine, err
 				continue
 			}
 			path := filepath.Join(rulesDir, entry.Name())
-			if err := e.LoadRulesFromFileWithOptions(path, opts); err != nil {
+			rules, err := persist.LoadFile(path, opts)
+			if err != nil {
 				return nil, fmt.Errorf("policy: load rules from %q: %w", path, err)
+			}
+			for _, rule := range rules {
+				e.AddRuleElement(rule)
 			}
 		}
 	}
-	return &Engine{
-		engine:            e,
-		minLivenessScore:  minLivenessScore,
-		minFaceMatchLevel: minFaceMatchLevel,
-	}, nil
+	return &Engine{engine: e}, nil
 }
 
 // EvaluateScan evaluates a combined scan result against the loaded SPOCP rules.
-// It first checks numeric thresholds (fast, explicit), then runs the categorical
-// SPOCP query. Returns nil if the scan is accepted.
+// The query includes liveness score and face match level as zero-padded atoms
+// so that range predicates in the rules can enforce numeric thresholds.
+// Returns nil if the scan is accepted by at least one rule.
 func (e *Engine) EvaluateScan(result facetec.ScanResult) error {
-	// Stage 1: numeric threshold checks.
-	score := int(result.Liveness.LivenessScore * 100)
-	if score < e.minLivenessScore {
-		return fmt.Errorf("policy: liveness score %d below minimum %d", score, e.minLivenessScore)
-	}
-	if result.IDScan.FaceMatchLevel < e.minFaceMatchLevel {
-		return fmt.Errorf("policy: face match level %d below minimum %d",
-			result.IDScan.FaceMatchLevel, e.minFaceMatchLevel)
-	}
-	// Stage 2: categorical SPOCP check (doc-type + verification flags).
 	query := buildQueryElement(result)
 	if !e.engine.QueryElement(query) {
-		return fmt.Errorf("policy: scan rejected — no matching rule for doc-type=%s", docType(result))
+		return fmt.Errorf("policy: scan rejected by policy rules")
 	}
 	return nil
 }
@@ -93,14 +83,20 @@ func (e *Engine) RuleCount() int {
 	return e.engine.RuleCount()
 }
 
-// buildQueryElement converts the categorical fields of a ScanResult into a SPOCP
-// S-expression element. Numeric fields (liveness score, face match level) are
-// intentionally excluded — they are handled by the explicit threshold checks above.
-// Query field order: doc-type, mrz-verified, nfc-verified, barcode-verified.
+// buildQueryElement converts a ScanResult into a SPOCP S-expression element.
+// Numeric fields are formatted as zero-padded fixed-width integers so that
+// lexicographic comparison in RangeNumeric star-forms matches numeric order:
+//   - liveness-score: 3-digit zero-padded (000–100)
+//   - face-match-level: 2-digit zero-padded (00–10)
+//
+// Field order: liveness-score, face-match-level, doc-type, mrz-verified,
+// nfc-verified, barcode-verified.
 func buildQueryElement(r facetec.ScanResult) sexp.Element {
-	dt := docType(r)
+	livenessScore := int(r.Liveness.LivenessScore * 100)
 	return sexp.NewList("facetec-scan",
-		sexp.NewList("doc-type", sexp.NewAtom(dt)),
+		sexp.NewList("liveness-score", sexp.NewAtom(fmt.Sprintf("%03d", livenessScore))),
+		sexp.NewList("face-match-level", sexp.NewAtom(fmt.Sprintf("%02d", r.IDScan.FaceMatchLevel))),
+		sexp.NewList("doc-type", sexp.NewAtom(docType(r))),
 		sexp.NewList("mrz-verified", sexp.NewAtom(boolStr(r.IDScan.MRZVerified))),
 		sexp.NewList("nfc-verified", sexp.NewAtom(boolStr(r.IDScan.NFCVerified))),
 		sexp.NewList("barcode-verified", sexp.NewAtom(boolStr(r.IDScan.BarcodeVerified))),

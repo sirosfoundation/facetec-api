@@ -56,9 +56,9 @@ session:
 
 # ── Security ──────────────────────────────────────────────────────────────────
 security:
-  # Pre-shared Bearer token required on all authenticated endpoints.
-  # Leave empty to DISABLE authentication (development only — never use in prod).
-  app_key: ""
+  # Legacy single-tenant Bearer token. Use jwt: instead for new deployments.
+  # Leave both empty to DISABLE authentication (development only — never in prod).
+  # app_key: ""
   # app_key_path: "/run/secrets/app_key"
 
   # Per-IP rate limiting on biometric endpoints (POST /liveness, /id-scan, /session-token).
@@ -66,9 +66,53 @@ security:
     enabled: true
     requests_per_minute: 10
 
+# ── JWT Authentication ─────────────────────────────────────────────────────────
+# All tenants are authenticated with the same shared HMAC secret.
+# The tenant_id claim in the token selects which policy and issuer settings apply.
+# Omitting tenant_id (or using an unconfigured value) falls back to the global
+# policy and issuer settings — suitable for most single-tenant deployments.
+jwt:
+  # HMAC secret for HS256/HS384/HS512. Use secret_path in production.
+  # secret: ""
+  # secret_path: "/run/secrets/jwt_secret"
+
+  # Expected iss claim. Leave empty to skip issuer validation.
+  # issuer: "https://auth.siros.org"
+
+  # When true, requests without a valid Bearer JWT are rejected (recommended in prod).
+  require_auth: false
+
 # ── Logging ───────────────────────────────────────────────────────────────────
 logging:
   # Log level: debug, info, warn, error
   level: "info"
   # Set true for JSON structured logging (recommended in production).
   production: false
+
+# ── Tenant overrides (optional) ───────────────────────────────────────────────
+# When this block is absent, a single "default" tenant is synthesised from the
+# global policy, issuer, and security settings above (backward-compatible mode).
+#
+# When present, each tenant is identified by the tenant_id claim in the JWT.
+# JWTs with no tenant_id claim, or with an unknown value, fall back to the
+# "default" tenant — so most deployments can start without any tenants: block
+# and add per-tenant overrides incrementally as requirements diverge.
+#
+# Example — two tenants with different credential scopes and policy strictness:
+#
+# tenants:
+#   - id: acme
+#     issuer:
+#       scope: "https://credentials.acme.example.org/photo-id"
+#       format: sdjwt
+#     policy:
+#       rules_dir: "/etc/facetec-api/rules/acme"
+#
+#   - id: gov
+#     issuer:
+#       scope: "https://credentials.gov.example.org/id-document"
+#       format: mdoc
+#     policy:
+#       rules_dir: "/etc/facetec-api/rules/gov"
+#       min_liveness_score: 92
+#       min_face_match_level: 9

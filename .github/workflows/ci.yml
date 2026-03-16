@@ -23,11 +23,14 @@ jobs:
 
       - name: Run tests with race detector
         run: |
-          go test -race \
+          GOWORK=off go test -race \
             -covermode=atomic \
             -coverprofile=coverage.out \
-            -coverpkg=./... \
-            ./...
+            ./internal/config/... \
+            ./internal/middleware/... \
+            ./internal/policy/... \
+            ./internal/session/... \
+            ./tests/...
 
       - name: Show coverage summary
         run: go tool cover -func=coverage.out | tail -5
