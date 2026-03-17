@@ -1,6 +1,8 @@
 module github.com/sirosfoundation/facetec-api
 
-go 1.25.1
+go 1.24.0
+
+toolchain go1.24.2
 
 require (
 	github.com/gin-gonic/gin v1.11.0
