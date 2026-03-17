@@ -33,7 +33,7 @@ func (c *Client) GetSessionToken(ctx context.Context) (*SessionTokenResponse, er
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("facetec: session-token: unexpected status %d", resp.StatusCode)
 	}
@@ -51,7 +51,7 @@ func (c *Client) SubmitLiveness(ctx context.Context, req *LivenessCheckRequest) 
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("facetec: liveness: unexpected status %d", resp.StatusCode)
 	}
@@ -69,7 +69,7 @@ func (c *Client) SubmitIDScan(ctx context.Context, req *IDScanRequest) (*IDScanR
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("facetec: id-scan: unexpected status %d", resp.StatusCode)
 	}

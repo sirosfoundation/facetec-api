@@ -131,4 +131,3 @@ func (s *Service) bindJSON(c *gin.Context, dst any) error {
 	}
 	return nil
 }
-

@@ -173,5 +173,3 @@ func buildOfferURI(srv config.ServerConfig, txID string) string {
 	}
 	return "openid-credential-offer://?credential_offer_uri=" + base + "/v1/offer/" + txID
 }
-
-

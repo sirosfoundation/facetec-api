@@ -163,7 +163,7 @@ func RateLimit(cfg *config.SecurityConfig, log *zap.Logger) gin.HandlerFunc {
 	}
 	rpm := cfg.RateLimit.RequestsPerMinute
 	type entry struct {
-		mu        sync.Mutex
+		mu         sync.Mutex
 		timestamps []time.Time
 	}
 	var mu sync.Mutex

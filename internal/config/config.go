@@ -23,18 +23,18 @@ type Config struct {
 	Logging  LoggingConfig  `yaml:"logging"`
 	// JWT holds the shared JWT validation settings for all tenant authentication.
 	// All tenants use the same secret and issuer; the tenant_id claim selects the tenant.
-	JWT      JWTConfig      `yaml:"jwt"`
+	JWT JWTConfig `yaml:"jwt"`
 	// Tenants defines per-tenant policy and issuer overrides.
 	// When empty, a single "default" tenant is synthesised from the global
 	// security.app_key and policy/issuer settings (backward-compatible mode).
 	// envconfig is not applied to this slice — configure tenants via YAML only.
-	Tenants  []TenantConfig `yaml:"tenants" envconfig:"-"`
+	Tenants []TenantConfig `yaml:"tenants" envconfig:"-"`
 }
 
 // ServerConfig controls the HTTP listener.
 type ServerConfig struct {
-	Host          string    `yaml:"host"           envconfig:"SERVER_HOST"`
-	Port          int       `yaml:"port"           envconfig:"SERVER_PORT"`
+	Host string `yaml:"host"           envconfig:"SERVER_HOST"`
+	Port int    `yaml:"port"           envconfig:"SERVER_PORT"`
 	// PublicBaseURL is the externally reachable base URL of this service, used when
 	// constructing OpenID4VCI credential offer URIs returned to wallets.
 	// Example: "https://facetec-api.example.org"
@@ -53,25 +53,25 @@ type TLSConfig struct {
 // FaceTecConfig holds connection details for the FaceTec Server.
 type FaceTecConfig struct {
 	// ServerURL is the base URL of the FaceTec Server (required).
-	ServerURL     string           `yaml:"server_url"      envconfig:"FACETEC_SERVER_URL"`
+	ServerURL string `yaml:"server_url"      envconfig:"FACETEC_SERVER_URL"`
 	// DeviceKey is the FaceTec SDK device key (required).
-	DeviceKey     string           `yaml:"device_key"      envconfig:"FACETEC_DEVICE_KEY"`
+	DeviceKey string `yaml:"device_key"      envconfig:"FACETEC_DEVICE_KEY"`
 	// DeviceKeyPath loads DeviceKey from a file (takes precedence over DeviceKey if set).
-	DeviceKeyPath string           `yaml:"device_key_path" envconfig:"FACETEC_DEVICE_KEY_PATH"`
-	Timeout       time.Duration    `yaml:"timeout"         envconfig:"FACETEC_TIMEOUT"`
+	DeviceKeyPath string        `yaml:"device_key_path" envconfig:"FACETEC_DEVICE_KEY_PATH"`
+	Timeout       time.Duration `yaml:"timeout"         envconfig:"FACETEC_TIMEOUT"`
 	// TLS configures the HTTPS connection to the FaceTec Server.
-	TLS           FaceTecTLSConfig `yaml:"tls"`
+	TLS FaceTecTLSConfig `yaml:"tls"`
 }
 
 // FaceTecTLSConfig controls TLS for the outbound FaceTec Server connection.
 type FaceTecTLSConfig struct {
 	// SkipVerify disables certificate verification. Never use in production.
-	SkipVerify bool   `yaml:"skip_verify" envconfig:"FACETEC_TLS_SKIP_VERIFY"`
+	SkipVerify bool `yaml:"skip_verify" envconfig:"FACETEC_TLS_SKIP_VERIFY"`
 	// CAFile is a PEM file with the CA certificate to trust for the FaceTec Server.
-	CAFile     string `yaml:"ca_file"     envconfig:"FACETEC_TLS_CA_FILE"`
+	CAFile string `yaml:"ca_file"     envconfig:"FACETEC_TLS_CA_FILE"`
 	// CertFile and KeyFile provide a client certificate for mutual TLS.
-	CertFile   string `yaml:"cert_file"   envconfig:"FACETEC_TLS_CERT_FILE"`
-	KeyFile    string `yaml:"key_file"    envconfig:"FACETEC_TLS_KEY_FILE"`
+	CertFile string `yaml:"cert_file"   envconfig:"FACETEC_TLS_CERT_FILE"`
+	KeyFile  string `yaml:"key_file"    envconfig:"FACETEC_TLS_KEY_FILE"`
 }
 
 // IssuerConfig holds the gRPC connection details for the vc credential issuer.
@@ -83,7 +83,7 @@ type IssuerConfig struct {
 	CertFile string `yaml:"cert_file" envconfig:"ISSUER_CERT_FILE"`
 	KeyFile  string `yaml:"key_file"  envconfig:"ISSUER_KEY_FILE"`
 	// Scope is the credential scope passed to MakeSDJWT / MakeMDoc.
-	Scope  string `yaml:"scope"   envconfig:"ISSUER_SCOPE"`
+	Scope string `yaml:"scope"   envconfig:"ISSUER_SCOPE"`
 	// Format selects the credential format: sdjwt (default), mdoc, or vc20.
 	Format string `yaml:"format"  envconfig:"ISSUER_FORMAT"`
 }
@@ -99,7 +99,7 @@ type PolicyConfig struct {
 type SecurityConfig struct {
 	// AppKey is a pre-shared Bearer token required on all non-health endpoints.
 	// When empty, authentication is disabled (development mode only).
-	AppKey     string `yaml:"app_key"      envconfig:"SECURITY_APP_KEY"`
+	AppKey string `yaml:"app_key"      envconfig:"SECURITY_APP_KEY"`
 	// AppKeyPath loads AppKey from a file (takes precedence over AppKey if set).
 	AppKeyPath string `yaml:"app_key_path" envconfig:"SECURITY_APP_KEY_PATH"`
 	// RateLimit controls per-IP request rate limiting on biometric endpoints.
@@ -108,7 +108,7 @@ type SecurityConfig struct {
 
 // RateLimitConfig controls rate limiting on biometric endpoints.
 type RateLimitConfig struct {
-	Enabled  bool    `yaml:"enabled"   envconfig:"SECURITY_RATE_LIMIT_ENABLED"`
+	Enabled bool `yaml:"enabled"   envconfig:"SECURITY_RATE_LIMIT_ENABLED"`
 	// RequestsPerMinute is the maximum number of requests per IP per minute.
 	RequestsPerMinute int `yaml:"requests_per_minute" envconfig:"SECURITY_RATE_LIMIT_RPM"`
 }
@@ -118,7 +118,7 @@ type SessionConfig struct {
 	// LivenessTTL is how long a FaceMap is retained between liveness and id-scan steps.
 	LivenessTTL time.Duration `yaml:"liveness_ttl" envconfig:"SESSION_LIVENESS_TTL"`
 	// OfferTTL is how long a credential offer is retained before redemption.
-	OfferTTL    time.Duration `yaml:"offer_ttl"    envconfig:"SESSION_OFFER_TTL"`
+	OfferTTL time.Duration `yaml:"offer_ttl"    envconfig:"SESSION_OFFER_TTL"`
 }
 
 // TenantPolicyConfig holds optional per-tenant policy overrides.
@@ -182,7 +182,7 @@ func Load(path string) (*Config, error) {
 		if err != nil {
 			return nil, fmt.Errorf("config: open %q: %w", path, err)
 		}
-		defer f.Close()
+		defer func() { _ = f.Close() }()
 		if err := yaml.NewDecoder(f).Decode(cfg); err != nil {
 			return nil, fmt.Errorf("config: decode %q: %w", path, err)
 		}
