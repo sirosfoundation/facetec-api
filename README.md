@@ -56,19 +56,27 @@ by environment variables. The full annotated reference is [configs/config.yaml](
 | `server.port` | `SERVER_PORT` | `8080` | Listen port |
 | `server.public_base_url` | `SERVER_PUBLIC_BASE_URL` | *(empty)* | Externally reachable base URL; used for `credentialOfferURI` |
 | `server.tls.enabled` | `SERVER_TLS_ENABLED` | `false` | Enable TLS on the HTTP listener |
+| `server.tls.cert_file` | `SERVER_TLS_CERT_FILE` | *(empty)* | TLS certificate file |
+| `server.tls.key_file` | `SERVER_TLS_KEY_FILE` | *(empty)* | TLS private key file |
 | `facetec.server_url` | `FACETEC_SERVER_URL` | *(required)* | FaceTec Server base URL |
+| `facetec.device_key` | `FACETEC_DEVICE_KEY` | *(required)* | FaceTec SDK device key (set directly or via `device_key_path`) |
 | `facetec.device_key_path` | `FACETEC_DEVICE_KEY_PATH` | *(optional)* | File containing the FaceTec device key |
-| `facetec.tls.ca_file` | `FACETEC_TLS_CA_FILE` | *(optional)* | CA certificate for outbound FaceTec TLS |
+| `facetec.timeout` | `FACETEC_TIMEOUT` | `30s` | HTTP timeout for FaceTec Server requests |
 | `facetec.tls.skip_verify` | `FACETEC_TLS_SKIP_VERIFY` | `false` | Disable cert verification — **never use in production** |
+| `facetec.tls.ca_file` | `FACETEC_TLS_CA_FILE` | *(optional)* | CA certificate for outbound FaceTec TLS |
+| `facetec.tls.cert_file` | `FACETEC_TLS_CERT_FILE` | *(optional)* | Client certificate for FaceTec mTLS |
+| `facetec.tls.key_file` | `FACETEC_TLS_KEY_FILE` | *(optional)* | Client private key for FaceTec mTLS |
 | `issuer.addr` | `ISSUER_ADDR` | *(required)* | gRPC address of the vc issuer (e.g. `issuer:8090`) |
 | `issuer.tls` | `ISSUER_TLS` | `false` | Enable TLS on the gRPC issuer connection |
+| `issuer.ca_file` | `ISSUER_CA_FILE` | *(optional)* | CA certificate for the issuer gRPC connection |
+| `issuer.cert_file` | `ISSUER_CERT_FILE` | *(optional)* | Client certificate for issuer mTLS |
+| `issuer.key_file` | `ISSUER_KEY_FILE` | *(optional)* | Client private key for issuer mTLS |
 | `issuer.scope` | `ISSUER_SCOPE` | *(required)* | Default credential scope URI |
 | `issuer.format` | `ISSUER_FORMAT` | `sdjwt` | Default credential format: `sdjwt`, `mdoc`, `vc20` |
 | `policy.rules_dir` | `POLICY_RULES_DIR` | *(empty)* | Directory of `.spoc` rule files |
-| `policy.min_liveness_score` | `POLICY_MIN_LIVENESS_SCORE` | `80` | Minimum liveness score (0–100) |
-| `policy.min_face_match_level` | `POLICY_MIN_FACE_MATCH_LEVEL` | `6` | Minimum face-match level (0–10) |
 | `session.liveness_ttl` | `SESSION_LIVENESS_TTL` | `2m` | How long a FaceMap is held in memory |
 | `session.offer_ttl` | `SESSION_OFFER_TTL` | `5m` | How long a credential offer is held in memory |
+| `logging.level` | `LOG_LEVEL` | `info` | Log level: `debug`, `info`, `warn`, `error` |
 | `logging.production` | `LOG_PRODUCTION` | `false` | Enable JSON structured logging (recommended in prod) |
 
 ### Authentication
@@ -89,7 +97,9 @@ JWT settings:
 | `jwt.secret_path` | `JWT_SECRET_PATH` | *(optional)* | File containing the JWT secret |
 | `jwt.issuer` | `JWT_ISSUER` | *(empty)* | Expected `iss` claim; leave empty to skip validation |
 | `jwt.require_auth` | `JWT_REQUIRE_AUTH` | `false` | Reject requests without a valid JWT |
+| `security.app_key` | `SECURITY_APP_KEY` | *(optional)* | Legacy Bearer token (set directly or via `app_key_path`) |
 | `security.app_key_path` | `SECURITY_APP_KEY_PATH` | *(optional)* | File containing a legacy Bearer token |
+| `security.rate_limit.enabled` | `SECURITY_RATE_LIMIT_ENABLED` | `true` | Enable per-IP rate limiting on biometric endpoints |
 | `security.rate_limit.requests_per_minute` | `SECURITY_RATE_LIMIT_RPM` | `10` | Per-IP rate limit on biometric endpoints |
 
 ### Multi-tenant operation
@@ -118,8 +128,6 @@ tenants:
       format: mdoc
     policy:
       rules_dir: "/etc/facetec-api/rules/gov"
-      min_liveness_score: 92        # overrides global; nil = inherit
-      min_face_match_level: 9
 ```
 
 ## API
@@ -169,8 +177,7 @@ Steps 2 and 3 are independently rate-limited per source IP.
 
 Scan acceptance is a two-stage process:
 
-1. **Numeric thresholds** (`policy.min_liveness_score`, `policy.min_face_match_level`) — hard
-   limits enforced in code; cannot be overridden by rules.
+1. **Numeric thresholds** — encoded directly in `.spoc` rule files as SPOCP range predicates.
 2. **Categorical SPOCP rules** (`.spoc` files in `policy.rules_dir`) — S-expressions that encode
    which combinations of document type and verification flags are acceptable.
 
