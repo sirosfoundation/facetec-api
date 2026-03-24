@@ -31,7 +31,7 @@ make build
 
 # Run with an example config (no TLS, no real FaceTec server)
 cp configs/config.yaml configs/config.local.yaml
-# Edit configs/config.local.yaml with your FaceTec Server URL, device key, and issuer address.
+# Edit configs/config.local.yaml with your FaceTec Server URL and issuer address.
 make run CONFIG=configs/config.local.yaml
 ```
 
@@ -57,7 +57,8 @@ by environment variables. The full annotated reference is [configs/config.yaml](
 | `server.public_base_url` | `SERVER_PUBLIC_BASE_URL` | *(empty)* | Externally reachable base URL; used for `credentialOfferURI` |
 | `server.tls.enabled` | `SERVER_TLS_ENABLED` | `false` | Enable TLS on the HTTP listener |
 | `facetec.server_url` | `FACETEC_SERVER_URL` | *(required)* | FaceTec Server base URL |
-| `facetec.device_key_path` | `FACETEC_DEVICE_KEY_PATH` | *(optional)* | File containing the FaceTec device key |
+| `facetec.device_key` | `FACETEC_DEVICE_KEY` | *(optional)* | FaceTec device key; sent as `X-Device-Key`. Only required by the FaceTec Testing API — omit when using your own FaceTec Server (v10+) |
+| `facetec.device_key_path` | `FACETEC_DEVICE_KEY_PATH` | *(optional)* | File containing the FaceTec device key (takes precedence over `device_key`) |
 | `facetec.tls.ca_file` | `FACETEC_TLS_CA_FILE` | *(optional)* | CA certificate for outbound FaceTec TLS |
 | `facetec.tls.skip_verify` | `FACETEC_TLS_SKIP_VERIFY` | `false` | Disable cert verification — **never use in production** |
 | `issuer.addr` | `ISSUER_ADDR` | *(required)* | gRPC address of the vc issuer (e.g. `issuer:8090`) |

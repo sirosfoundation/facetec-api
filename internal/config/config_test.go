@@ -149,13 +149,13 @@ func TestValidate_MissingServerURL(t *testing.T) {
 	}
 }
 
-func TestValidate_MissingDeviceKey(t *testing.T) {
+func TestValidate_WithoutDeviceKey(t *testing.T) {
 	cfg := &config.Config{
 		FaceTec: config.FaceTecConfig{ServerURL: "https://x"},
 		Issuer:  config.IssuerConfig{Addr: "x", Scope: "s"},
 	}
-	if err := cfg.Validate(); err == nil {
-		t.Error("expected error for missing facetec.device_key")
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("unexpected error: device_key should be optional: %v", err)
 	}
 }
 
