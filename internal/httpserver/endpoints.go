@@ -1,6 +1,7 @@
 package httpserver
 
 import (
+	"maps"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -45,6 +46,37 @@ func (s *Service) endpointSessionToken(c *gin.Context) {
 		return
 	}
 	s.respond(c, http.StatusOK, resp)
+}
+
+// endpointProcessRequest accepts FaceTec's opaque requestBlob payload, forwards
+// it to the FaceTec Server, and preserves the upstream response JSON. When the
+// upstream result is a successful photo-ID match, the response is augmented with
+// transactionId and credentialOfferURI for the wallet flow.
+func (s *Service) endpointProcessRequest(c *gin.Context) {
+	var req facetec.ProcessRequestRequest
+	if err := s.bindJSON(c, &req); err != nil {
+		return
+	}
+
+	resp, err := s.apiv1.ProcessRequest(c.Request.Context(), &req)
+	if err != nil {
+		s.fail(c, http.StatusBadGateway, err, "process-request failed")
+		return
+	}
+
+	body := gin.H{}
+	for key, value := range maps.Clone(resp.Payload) {
+		body[key] = value
+	}
+	if resp.TransactionID != "" {
+		body["transactionId"] = resp.TransactionID
+		body["credentialOfferURI"] = buildOfferURI(s.cfg.Server, resp.TransactionID)
+	}
+	if resp.CredentialIssueError != "" {
+		body["credentialIssueError"] = resp.CredentialIssueError
+	}
+
+	s.respond(c, http.StatusOK, body)
 }
 
 // LivenessScanRequest is the body expected by POST /v1/liveness.

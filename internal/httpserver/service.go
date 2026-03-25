@@ -88,6 +88,8 @@ func (s *Service) registerRoutes(r *gin.Engine, registry *tenant.Registry) {
 	// Versioned API — authentication + rate limiting applied to all routes.
 	auth := middleware.TenantAuth(registry, s.cfg, s.log)
 	rl := middleware.RateLimit(&s.cfg.Security, s.log)
+	processor := r.Group("", auth, rl)
+	processor.POST("/process-request", s.endpointProcessRequest)
 
 	v1 := r.Group("/v1", auth)
 	{
@@ -96,6 +98,7 @@ func (s *Service) registerRoutes(r *gin.Engine, registry *tenant.Registry) {
 
 		// Biometric endpoints — additionally rate-limited.
 		bio := v1.Group("", rl)
+		bio.POST("/process-request", s.endpointProcessRequest)
 		bio.POST("/session-token", s.endpointSessionToken)
 		bio.POST("/liveness", s.endpointLiveness)
 		bio.POST("/id-scan", s.endpointIDScan)

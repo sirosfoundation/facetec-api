@@ -184,6 +184,65 @@ func (c *Client) SubmitIDScan(ctx context.Context, livenessSessionID string, idS
 	return txID, nil
 }
 
+// ProcessRequest proxies FaceTec's requestBlob/responseBlob exchange and, when
+// the upstream result represents a successful photo-ID match, reuses the
+// existing policy and credential issuance pipeline.
+func (c *Client) ProcessRequest(ctx context.Context, req *facetec.ProcessRequestRequest) (*facetec.ProcessRequestResponse, error) {
+	payload, err := c.ft.ProcessRequest(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("process-request: facetec server: %w", err)
+	}
+
+	resp := &facetec.ProcessRequestResponse{Payload: payload}
+
+	scanResult, ok, err := facetec.ExtractScanResult(payload)
+	if err != nil {
+		c.log.Warn("process-request result could not be translated for issuance",
+			zap.Error(err),
+		)
+		resp.CredentialIssueError = "unable to evaluate scan result"
+		return resp, nil
+	}
+	if !ok {
+		return resp, nil
+	}
+
+	tc, ok := tenant.FromStdContext(ctx)
+	if !ok {
+		c.log.Error("process-request tenant context missing")
+		resp.CredentialIssueError = "credential issuance unavailable"
+		return resp, nil
+	}
+
+	if err := tc.Policy.EvaluateScan(*scanResult); err != nil {
+		c.log.Info("process-request scan rejected by policy",
+			zap.String("tenant", tc.ID),
+			zap.String("doc_type", scanResult.IDScan.DocumentData.DocumentType),
+			zap.Int("face_match_level", scanResult.IDScan.FaceMatchLevel),
+			zap.Error(err),
+		)
+		resp.CredentialIssueError = "scan rejected by policy"
+		return resp, nil
+	}
+
+	txID, err := c.issueCredential(ctx, *scanResult, tc.Issuer)
+	if err != nil {
+		c.log.Error("process-request credential issuance failed", zap.Error(err))
+		resp.CredentialIssueError = "credential issuance failed"
+		return resp, nil
+	}
+
+	c.log.Info("AUDIT credential_issued",
+		zap.String("tenant", tc.ID),
+		zap.String("transaction_id", txID),
+		zap.String("doc_type", scanResult.IDScan.DocumentData.DocumentType),
+		zap.String("format", tc.Issuer.Format),
+		zap.String("scope", tc.Issuer.Scope),
+	)
+	resp.TransactionID = txID
+	return resp, nil
+}
+
 // RedeemOffer retrieves and atomically removes a credential offer by transaction ID.
 // The offer is one-time-use; a second call with the same ID returns an error.
 func (c *Client) RedeemOffer(ctx context.Context, txID string) (*session.OfferEntry, error) {

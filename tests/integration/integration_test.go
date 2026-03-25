@@ -42,6 +42,9 @@ type stubApiv1 struct {
 	idScanID  string
 	idScanErr error
 
+	processResp *facetec.ProcessRequestResponse
+	processErr  error
+
 	redeemEntry *session.OfferEntry
 	redeemErr   error
 }
@@ -83,6 +86,25 @@ func (s *stubApiv1) SubmitIDScan(_ context.Context, _ string, _ *facetec.IDScanR
 		id = "offer-tx-id"
 	}
 	return id, nil
+}
+
+func (s *stubApiv1) ProcessRequest(_ context.Context, _ *facetec.ProcessRequestRequest) (*facetec.ProcessRequestResponse, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.processErr != nil {
+		return nil, s.processErr
+	}
+	if s.processResp != nil {
+		return s.processResp, nil
+	}
+	return &facetec.ProcessRequestResponse{
+		Payload: map[string]any{
+			"responseBlob": "response-blob",
+			"result": map[string]any{
+				"success": true,
+			},
+		},
+	}, nil
 }
 
 func (s *stubApiv1) RedeemOffer(_ context.Context, _ string) (*session.OfferEntry, error) {
@@ -275,6 +297,83 @@ func TestSessionToken_BackendError_502(t *testing.T) {
 	stub := &stubApiv1{sessionTokenErr: errors.New("server down")}
 	ts := newTestServer(t, stub, "")
 	resp := postJSON(t, ts, "/v1/session-token", nil, "")
+	assertStatus(t, resp, http.StatusBadGateway)
+}
+
+// ----------------------------------------------------------------------------
+// FaceTec process-request endpoint
+// ----------------------------------------------------------------------------
+
+func TestProcessRequest_Success(t *testing.T) {
+	stub := &stubApiv1{
+		processResp: &facetec.ProcessRequestResponse{
+			Payload: map[string]any{
+				"responseBlob": "resp-blob",
+				"result": map[string]any{
+					"success": true,
+				},
+			},
+			TransactionID: "tx-process-1",
+		},
+	}
+	ts := newTestServer(t, stub, "")
+
+	body := map[string]string{
+		"requestBlob":           "req-blob",
+		"externalDatabaseRefID": "ext-123",
+	}
+	resp := postJSON(t, ts, "/process-request", body, "")
+	assertStatus(t, resp, http.StatusOK)
+
+	var rBody map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&rBody); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if got, _ := rBody["responseBlob"].(string); got != "resp-blob" {
+		t.Errorf("responseBlob: got %q, want %q", got, "resp-blob")
+	}
+	if got, _ := rBody["transactionId"].(string); got != "tx-process-1" {
+		t.Errorf("transactionId: got %q, want %q", got, "tx-process-1")
+	}
+	if got, _ := rBody["credentialOfferURI"].(string); got == "" {
+		t.Error("expected credentialOfferURI in process-request response")
+	}
+}
+
+func TestProcessRequest_IssuanceError_PreservedPayload(t *testing.T) {
+	stub := &stubApiv1{
+		processResp: &facetec.ProcessRequestResponse{
+			Payload: map[string]any{
+				"responseBlob": "resp-blob",
+				"result": map[string]any{
+					"success": true,
+				},
+			},
+			CredentialIssueError: "scan rejected by policy",
+		},
+	}
+	ts := newTestServer(t, stub, "")
+
+	resp := postJSON(t, ts, "/v1/process-request", map[string]string{"requestBlob": "req-blob"}, "")
+	assertStatus(t, resp, http.StatusOK)
+
+	var rBody map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&rBody); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if got, _ := rBody["responseBlob"].(string); got != "resp-blob" {
+		t.Errorf("responseBlob: got %q, want %q", got, "resp-blob")
+	}
+	if got, _ := rBody["credentialIssueError"].(string); got != "scan rejected by policy" {
+		t.Errorf("credentialIssueError: got %q, want %q", got, "scan rejected by policy")
+	}
+}
+
+func TestProcessRequest_BackendError_502(t *testing.T) {
+	stub := &stubApiv1{processErr: errors.New("facetec unavailable")}
+	ts := newTestServer(t, stub, "")
+
+	resp := postJSON(t, ts, "/process-request", map[string]string{"requestBlob": "req-blob"}, "")
 	assertStatus(t, resp, http.StatusBadGateway)
 }
 

@@ -80,6 +80,25 @@ func (c *Client) SubmitIDScan(ctx context.Context, req *IDScanRequest) (*IDScanR
 	return &result, nil
 }
 
+// ProcessRequest forwards an opaque FaceTec request blob to the FaceTec Server.
+// The response payload is returned as a generic JSON object so the HTTP layer can
+// preserve FaceTec's SDK-facing contract while augmenting it with app metadata.
+func (c *Client) ProcessRequest(ctx context.Context, req *ProcessRequestRequest) (map[string]any, error) {
+	resp, err := c.post(ctx, "/process-request", req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("facetec: process-request: unexpected status %d", resp.StatusCode)
+	}
+	var result map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("facetec: process-request: decode response: %w", err)
+	}
+	return result, nil
+}
+
 func (c *Client) post(ctx context.Context, path string, body any) (*http.Response, error) {
 	var buf bytes.Buffer
 	if body != nil {

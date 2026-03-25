@@ -49,29 +49,41 @@ Mobile App (FaceTec SDK)
 
 ### Scan Flow
 
-1. **Session Token** — `POST /session-token`: facetec-api proxies to FaceTec Server to obtain a
-   short-lived session token scoping the biometric capture.
+facetec-api now supports two mobile-facing contracts:
 
-2. **Liveness Check** — `POST /liveness`: mobile app submits FaceScan blobs captured by the SDK.
-   facetec-api forwards to FaceTec Server. On success, the server-side FaceMap (a derived biometric
-   template, not a raw image) is stored in an in-memory liveness session with a 2-minute TTL.
-   An opaque `livenessSessionId` is returned to the caller. The raw FaceScan blobs are immediately
-   discarded.
+1. **Preferred FaceTec-native flow** — `POST /process-request` or `POST /v1/process-request`
+2. **Legacy split flow** — `POST /v1/session-token`, `POST /v1/liveness`, `POST /v1/id-scan`
 
-3. **Photo ID Scan** — `POST /id-scan`: mobile app submits ID scan blobs and the `livenessSessionId`.
-   facetec-api retrieves the stored FaceMap, combines it with the ID scan data, and forwards to
-   FaceTec Server for face matching and OCR. The FaceMap is discarded after this call.
+The preferred flow keeps the mobile app aligned with FaceTec's `SessionRequestProcessor` pattern.
+facetec-api forwards the opaque `requestBlob` to FaceTec Server, preserves the upstream JSON
+response, and augments successful photo-ID matches with local credential-offer metadata.
 
-4. **Policy Evaluation** — The combined `ScanResult` (liveness score, face match level, document
-   data, MRZ/NFC/barcode signals) is serialised as an S-expression and evaluated by the embedded
-   go-spocp engine against rules loaded from the configured rules directory.
+1. **Process Request** — `POST /process-request`: the mobile app submits `{ requestBlob,
+  externalDatabaseRefID? }`. facetec-api forwards the payload to FaceTec Server `/process-request`
+  and returns the upstream payload unchanged to the app.
 
-5. **Credential Issuance** — On policy pass, the OCR-extracted `DocumentData` (no biometrics) is
-   JSON-encoded and sent to the `vc` IssuerService via gRPC. The resulting signed credential is
-   stored in a second in-memory session (the credential offer), TTL 5 minutes, one-time-use.
+2. **Result Translation** — If the upstream payload represents a successful photo-ID match,
+  facetec-api translates the returned liveness, face-match, document, and verification signals
+  into the internal `ScanResult` structure used by policy evaluation.
+
+3. **Policy Evaluation** — The translated `ScanResult` is serialised as an S-expression and
+  evaluated by the embedded go-spocp engine against rules loaded from the configured rules
+  directory.
+
+4. **Credential Issuance** — On policy pass, the OCR-extracted `DocumentData` (no biometrics) is
+  JSON-encoded and sent to the `vc` IssuerService via gRPC. The resulting signed credential is
+  stored in a second in-memory session (the credential offer), TTL 5 minutes, one-time-use.
+
+5. **Augmented Response** — facetec-api adds `transactionId` and `credentialOfferURI` to the
+  response body while preserving FaceTec's `responseBlob`. If policy or issuance fails, it instead
+  adds `credentialIssueError` and still returns the upstream payload so the SDK can complete
+  normally.
 
 6. **Offer Redemption** — `GET /offer/{transactionId}`: the wallet retrieves the credential.
-   The session entry is atomically deleted on read.
+  The session entry is atomically deleted on read.
+
+The legacy split flow remains available for clients that still use explicit session-token,
+liveness, and ID-scan steps.
 
 ### SPOCP Policy Format
 
@@ -99,7 +111,9 @@ query — i.e., when the actual scan meets or exceeds the rule's stated threshol
 
 The mobile app communicates with facetec-api directly (separate port/domain). The resulting
 `credentialOfferURI` follows OpenID4VCI and can be redeemed by the standard wallet frontend without
-any awareness of the biometric origin.
+any awareness of the biometric origin. In the preferred FaceTec-native flow, the mobile app only
+needs to forward `requestBlob`/`responseBlob` between the SDK and facetec-api, and can defer wallet
+handoff until the FaceTec UI exits.
 
 ## Rationale
 
