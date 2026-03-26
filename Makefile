@@ -1,5 +1,5 @@
 .PHONY: all build test test-unit test-integration lint fmt vet clean \
-        docker docker-push run dev proto help
+        docker docker-push run dev proto help setup
 
 # ── Build variables ──────────────────────────────────────────────────────────
 BINARY      := facetec-api
@@ -117,6 +117,9 @@ tools: ## Install required development tools
 	@go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
 	@go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
 	@echo "Done."
+
+setup: ## Set up development environment (install hooks)
+	@bash scripts/setup-dev.sh
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort \
