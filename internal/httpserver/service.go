@@ -33,11 +33,19 @@ func New(_ context.Context, cfg *config.Config, apiv1 Apiv1, registry *tenant.Re
 	// Use gin.New() (not gin.Default()) so we control every middleware and
 	// never accidentally log request bodies that may contain biometric data.
 	router := gin.New()
+	router.HandleMethodNotAllowed = true
 	router.Use(
 		gin.RecoveryWithWriter(nil), // panic recovery without body logging
 		middleware.SecurityHeaders(),
 		middleware.RequestLogger(log),
 	)
+
+	router.NoRoute(func(c *gin.Context) {
+		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+	})
+	router.NoMethod(func(c *gin.Context) {
+		c.JSON(http.StatusMethodNotAllowed, gin.H{"error": "method not allowed"})
+	})
 
 	svc := &Service{cfg: cfg, log: log, apiv1: apiv1, router: router}
 	svc.registerRoutes(router, registry)
