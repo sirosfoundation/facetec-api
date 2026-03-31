@@ -154,12 +154,13 @@ func injectTenant(c *gin.Context, registry *tenant.Registry, tenantID string, lo
 	return true
 }
 
-// RateLimit returns a per-IP sliding-window rate limiter middleware.
-// Requests exceeding rpm per minute from a single IP receive HTTP 429.
-// If cfg.RateLimit.Enabled is false, the middleware is a no-op.
-func RateLimit(cfg *config.SecurityConfig, log *zap.Logger) gin.HandlerFunc {
+// RateLimit returns a per-IP sliding-window rate limiter middleware and a stop
+// function that halts its background cleanup goroutine. The caller must invoke
+// the returned stop function during shutdown to prevent a goroutine leak.
+// If cfg.RateLimit.Enabled is false, the middleware is a no-op and stop is nil.
+func RateLimit(cfg *config.SecurityConfig, log *zap.Logger) (gin.HandlerFunc, func()) {
 	if !cfg.RateLimit.Enabled || cfg.RateLimit.RequestsPerMinute <= 0 {
-		return func(c *gin.Context) { c.Next() }
+		return func(c *gin.Context) { c.Next() }, nil
 	}
 	rpm := cfg.RateLimit.RequestsPerMinute
 	type entry struct {
@@ -168,26 +169,34 @@ func RateLimit(cfg *config.SecurityConfig, log *zap.Logger) gin.HandlerFunc {
 	}
 	var mu sync.Mutex
 	buckets := make(map[string]*entry)
+	done := make(chan struct{})
 
 	// Background cleanup: remove stale IP buckets to prevent unbounded map growth (S4).
 	go func() {
 		ticker := time.NewTicker(5 * time.Minute)
 		defer ticker.Stop()
-		for range ticker.C {
-			cutoff := time.Now().Add(-time.Minute)
-			mu.Lock()
-			for ip, e := range buckets {
-				e.mu.Lock()
-				if len(e.timestamps) == 0 || e.timestamps[len(e.timestamps)-1].Before(cutoff) {
-					delete(buckets, ip)
+		for {
+			select {
+			case <-ticker.C:
+				cutoff := time.Now().Add(-time.Minute)
+				mu.Lock()
+				for ip, e := range buckets {
+					e.mu.Lock()
+					if len(e.timestamps) == 0 || e.timestamps[len(e.timestamps)-1].Before(cutoff) {
+						delete(buckets, ip)
+					}
+					e.mu.Unlock()
 				}
-				e.mu.Unlock()
+				mu.Unlock()
+			case <-done:
+				return
 			}
-			mu.Unlock()
 		}
 	}()
 
-	return func(c *gin.Context) {
+	stop := func() { close(done) }
+
+	handler := func(c *gin.Context) {
 		ip := c.ClientIP()
 		mu.Lock()
 		e, ok := buckets[ip]
@@ -222,6 +231,8 @@ func RateLimit(cfg *config.SecurityConfig, log *zap.Logger) gin.HandlerFunc {
 		}
 		c.Next()
 	}
+
+	return handler, stop
 }
 
 // SecurityHeaders adds common HTTP security response headers to all responses.

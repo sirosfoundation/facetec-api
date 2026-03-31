@@ -16,11 +16,12 @@ import (
 
 // Service is the HTTP server for facetec-api.
 type Service struct {
-	cfg    *config.Config
-	log    *zap.Logger
-	apiv1  Apiv1
-	router *gin.Engine
-	server *http.Server
+	cfg             *config.Config
+	log             *zap.Logger
+	apiv1           Apiv1
+	router          *gin.Engine
+	server          *http.Server
+	stopRateLimiter func() // nil when rate limiting is disabled
 }
 
 // New creates and configures the HTTP service but does not start listening.
@@ -82,9 +83,12 @@ func (s *Service) Start(_ context.Context) error {
 	return err
 }
 
-// Close gracefully shuts down the HTTP server.
+// Close gracefully shuts down the HTTP server and stops background goroutines.
 func (s *Service) Close(ctx context.Context) error {
 	s.log.Info("facetec-api HTTP server shutting down")
+	if s.stopRateLimiter != nil {
+		s.stopRateLimiter()
+	}
 	return s.server.Shutdown(ctx)
 }
 
@@ -95,7 +99,8 @@ func (s *Service) registerRoutes(r *gin.Engine, registry *tenant.Registry) {
 
 	// Versioned API — authentication + rate limiting applied to all routes.
 	auth := middleware.TenantAuth(registry, s.cfg, s.log)
-	rl := middleware.RateLimit(&s.cfg.Security, s.log)
+	rl, stopRL := middleware.RateLimit(&s.cfg.Security, s.log)
+	s.stopRateLimiter = stopRL
 	processor := r.Group("", auth, rl)
 	processor.POST("/process-request", s.endpointProcessRequest)
 
