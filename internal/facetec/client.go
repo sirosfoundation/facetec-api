@@ -18,7 +18,9 @@ type Client struct {
 
 // NewClient creates a FaceTec Server client.
 // serverURL must be the base URL of the FaceTec Server (e.g. "https://facetec.example.org").
-// deviceKey is the FaceTec device SDK key used to authenticate requests.
+// deviceKey is the FaceTec device SDK key. When non-empty it is sent as the
+// X-Device-Key request header. It is only required by the FaceTec Testing API
+// and can be omitted when connecting to your own FaceTec Server (v10+).
 func NewClient(serverURL, deviceKey string, httpClient *http.Client) *Client {
 	return &Client{
 		serverURL:  serverURL,
@@ -111,6 +113,8 @@ func (c *Client) post(ctx context.Context, path string, body any) (*http.Respons
 		return nil, fmt.Errorf("facetec: build request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Device-Key", c.deviceKey)
+	if c.deviceKey != "" {
+		req.Header.Set("X-Device-Key", c.deviceKey)
+	}
 	return c.httpClient.Do(req)
 }
