@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 )
 
@@ -53,7 +54,11 @@ func (c *Client) SubmitLiveness(ctx context.Context, req *LivenessCheckRequest) 
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			log.Printf("facetec: liveness: closing response body: %v", err)
+		}
+	}()
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("facetec: liveness: unexpected status %d", resp.StatusCode)
 	}
@@ -71,7 +76,11 @@ func (c *Client) SubmitIDScan(ctx context.Context, req *IDScanRequest) (*IDScanR
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			log.Printf("facetec: id-scan: closing response body: %v", err)
+		}
+	}()
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("facetec: id-scan: unexpected status %d", resp.StatusCode)
 	}
@@ -90,7 +99,11 @@ func (c *Client) ProcessRequest(ctx context.Context, req *ProcessRequestRequest)
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			log.Printf("facetec: process-request: closing response body: %v", err)
+		}
+	}()
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("facetec: process-request: unexpected status %d", resp.StatusCode)
 	}
