@@ -141,7 +141,7 @@ func TestRateLimit_AllowsWithinLimit(t *testing.T) {
 	}
 }
 
-func TestRateLimit_Blocks_WhenExceeded(t *testing.T) {
+func TestRateLimit_BlocksWhenExceeded(t *testing.T) {
 	cfg := &config.SecurityConfig{
 		RateLimit: config.RateLimitConfig{Enabled: true, RequestsPerMinute: 2},
 	}
@@ -212,7 +212,7 @@ func makeJWT(t *testing.T, secret, issuer, tenantID string) string {
 }
 
 // TestTenantAuth_DevMode passes all requests without any auth header.
-func TestTenantAuth_DevMode_PassThrough(t *testing.T) {
+func TestTenantAuth_DevModePassThrough(t *testing.T) {
 	reg := buildTestRegistry(t)
 	cfg := &config.Config{} // no JWT.Secret, no Security.AppKey
 	r := newRouter(middleware.TenantAuth(reg, cfg, zap.NewNop()))
