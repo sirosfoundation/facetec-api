@@ -33,6 +33,9 @@ func TestLoad_Defaults(t *testing.T) {
 	if cfg.Security.RateLimit.RequestsPerMinute != 10 {
 		t.Errorf("RateLimit.RequestsPerMinute: got %d, want 10", cfg.Security.RateLimit.RequestsPerMinute)
 	}
+	if cfg.Server.MaxConcurrentBiometric != 10 {
+		t.Errorf("Server.MaxConcurrentBiometric: got %d, want 10", cfg.Server.MaxConcurrentBiometric)
+	}
 }
 
 // TestLoad_FromFile verifies that values are read from a YAML file.

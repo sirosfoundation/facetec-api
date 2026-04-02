@@ -5,8 +5,21 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 )
+
+// maxResponseBody caps FaceTec Server responses to prevent memory exhaustion
+// from unexpectedly large payloads.
+const maxResponseBody = 15 << 20 // 15 MB
+
+// limitedReadCloser combines an io.LimitReader with the original Closer.
+type limitedReadCloser struct {
+	io.Reader
+	closer io.Closer
+}
+
+func (l limitedReadCloser) Close() error { return l.closer.Close() }
 
 // Client wraps the FaceTec Server REST API.
 // It never persists any data; all biometric payloads pass through in memory only.
@@ -50,6 +63,9 @@ func (c *Client) GetSessionToken(ctx context.Context) (*SessionTokenResponse, er
 // The returned LivenessCheckResult.FaceMap must be held in memory only and never written to disk.
 func (c *Client) SubmitLiveness(ctx context.Context, req *LivenessCheckRequest) (*LivenessCheckResult, error) {
 	resp, err := c.post(ctx, "/liveness-3d", req)
+	req.FaceScanBase64 = "" // release biometric payload for GC
+	req.AuditTrailBase64 = nil
+	req.LowQualityAuditTrailBase64 = nil
 	if err != nil {
 		return nil, err
 	}
@@ -68,6 +84,10 @@ func (c *Client) SubmitLiveness(ctx context.Context, req *LivenessCheckRequest) 
 // req.FaceMap must be populated from the in-memory liveness session before calling this method.
 func (c *Client) SubmitIDScan(ctx context.Context, req *IDScanRequest) (*IDScanResult, error) {
 	resp, err := c.post(ctx, "/match-3d-3d", req)
+	req.IDScanBase64 = "" // release scan data for GC
+	req.IDScanFrontImagesCompressedBase64 = nil
+	req.IDScanBackImagesCompressedBase64 = nil
+	req.FaceMap = ""
 	if err != nil {
 		return nil, err
 	}
@@ -87,6 +107,7 @@ func (c *Client) SubmitIDScan(ctx context.Context, req *IDScanRequest) (*IDScanR
 // preserve FaceTec's SDK-facing contract while augmenting it with app metadata.
 func (c *Client) ProcessRequest(ctx context.Context, req *ProcessRequestRequest) (map[string]any, error) {
 	resp, err := c.post(ctx, "/process-request", req)
+	req.RequestBlob = "" // release ~5 MB blob for GC
 	if err != nil {
 		return nil, err
 	}
@@ -117,8 +138,13 @@ func (c *Client) post(ctx context.Context, path string, body any) (*http.Respons
 		req.Header.Set("X-Device-Key", c.deviceKey)
 	}
 	resp, err := c.httpClient.Do(req)
+	buf.Reset() // release encoding buffer for GC
 	if err != nil {
 		return nil, fmt.Errorf("facetec: post %s: %w", path, err)
+	}
+	resp.Body = limitedReadCloser{
+		Reader: io.LimitReader(resp.Body, maxResponseBody),
+		closer: resp.Body,
 	}
 	return resp, nil
 }

@@ -7,6 +7,12 @@ server:
   host: "0.0.0.0"
   port: 8080
 
+  # Maximum number of biometric requests (process-request, liveness, id-scan,
+  # session-token) processed concurrently. Each request amplifies payload size
+  # ~3-4× in memory; this cap prevents OOM under sustained concurrency.
+  # Set to 0 to disable the limit.
+  max_concurrent_biometric: 10
+
   # Externally reachable base URL; used when constructing credential offer URIs.
   # If empty, the service falls back to the bind address (development only).
   # public_base_url: "https://facetec-api.example.org"

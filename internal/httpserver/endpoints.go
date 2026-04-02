@@ -1,7 +1,6 @@
 package httpserver
 
 import (
-	"maps"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -64,19 +63,15 @@ func (s *Service) endpointProcessRequest(c *gin.Context) {
 		return
 	}
 
-	body := gin.H{}
-	for key, value := range maps.Clone(resp.Payload) {
-		body[key] = value
-	}
 	if resp.TransactionID != "" {
-		body["transactionId"] = resp.TransactionID
-		body["credentialOfferURI"] = buildOfferURI(s.cfg.Server, resp.TransactionID)
+		resp.Payload["transactionId"] = resp.TransactionID
+		resp.Payload["credentialOfferURI"] = buildOfferURI(s.cfg.Server, resp.TransactionID)
 	}
 	if resp.CredentialIssueError != "" {
-		body["credentialIssueError"] = resp.CredentialIssueError
+		resp.Payload["credentialIssueError"] = resp.CredentialIssueError
 	}
 
-	s.respond(c, http.StatusOK, body)
+	s.respond(c, http.StatusOK, resp.Payload)
 }
 
 // LivenessScanRequest is the body expected by POST /v1/liveness.

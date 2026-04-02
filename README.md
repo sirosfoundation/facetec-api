@@ -55,6 +55,7 @@ by environment variables. The full annotated reference is [configs/config.yaml](
 | `server.host` | `SERVER_HOST` | `0.0.0.0` | Listen address |
 | `server.port` | `SERVER_PORT` | `8080` | Listen port |
 | `server.public_base_url` | `SERVER_PUBLIC_BASE_URL` | *(empty)* | Externally reachable base URL; used for `credentialOfferURI` |
+| `server.max_concurrent_biometric` | `SERVER_MAX_CONCURRENT_BIOMETRIC` | `10` | Max parallel biometric requests; excess get `503`. Limits peak memory from large payloads. `0` = unlimited |
 | `server.tls.enabled` | `SERVER_TLS_ENABLED` | `false` | Enable TLS on the HTTP listener |
 | `server.tls.cert_file` | `SERVER_TLS_CERT_FILE` | *(empty)* | TLS certificate file |
 | `server.tls.key_file` | `SERVER_TLS_KEY_FILE` | *(empty)* | TLS private key file |
@@ -262,6 +263,16 @@ Query fields available in every SPOCP query:
   prevent algorithm-confusion attacks. Legacy Bearer fallback uses constant-time comparison.
 - **Rate limiting.** Biometric endpoints are rate-limited per source IP (default 10 rpm); stale
   IP buckets are evicted every 5 minutes to prevent unbounded memory growth.
+- **Concurrency cap.** Biometric requests amplify payload size ~3-4× in memory (decoded blob,
+  re-encoded forward buffer, upstream response, JSON output). `max_concurrent_biometric`
+  (default 10) limits the number of in-flight biometric requests; excess callers receive `503`
+  immediately instead of queuing. Combined with `GOMEMLIMIT`, this prevents OOM under sustained
+  load.
+- **Upstream response cap.** All FaceTec Server responses are capped at 15 MB via `io.LimitReader`
+  to prevent memory exhaustion from unexpectedly large payloads.
+- **Eager payload release.** Request payloads (requestBlob, faceScan, idScan) are zeroed
+  immediately after forwarding to the FaceTec Server so the GC can reclaim them while the
+  upstream response is still in flight.
 - **Security response headers.** `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`,
   `Cache-Control: no-store` on every response.
 - **HTTP timeouts.** `ReadHeaderTimeout: 10s`, `WriteTimeout: 90s`, `IdleTimeout: 120s`.

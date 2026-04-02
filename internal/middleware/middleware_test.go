@@ -329,3 +329,49 @@ func TestTenantAuth_JWT_MissingHeaderRequireAuth(t *testing.T) {
 		t.Errorf("expected 401, got %d", w.Code)
 	}
 }
+
+// ── MaxConcurrent ─────────────────────────────────────────────────────────────
+
+func TestMaxConcurrent_AllowsUnderLimit(t *testing.T) {
+	r := newRouter(middleware.MaxConcurrent(2))
+	if w := get(r); w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Code)
+	}
+}
+
+func TestMaxConcurrent_DisabledWhenZero(t *testing.T) {
+	r := newRouter(middleware.MaxConcurrent(0))
+	if w := get(r); w.Code != http.StatusOK {
+		t.Errorf("expected 200 (no-op), got %d", w.Code)
+	}
+}
+
+func TestMaxConcurrent_RejectsWhenFull(t *testing.T) {
+	started := make(chan struct{})
+	block := make(chan struct{})
+	r := gin.New()
+	r.Use(middleware.MaxConcurrent(1))
+	r.GET("/test", func(c *gin.Context) {
+		started <- struct{}{} // signal handler is running
+		<-block               // wait for test to unblock
+		c.Status(http.StatusOK)
+	})
+
+	// First request occupies the single slot.
+	go func() {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/test", nil)
+		r.ServeHTTP(w, req)
+	}()
+	<-started // first request is in the handler, holding the semaphore
+
+	// Second request must be rejected immediately.
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusServiceUnavailable {
+		t.Errorf("expected 503 when all slots occupied, got %d", w.Code)
+	}
+
+	close(block) // let first request complete
+}

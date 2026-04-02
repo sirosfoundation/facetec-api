@@ -235,6 +235,29 @@ func RateLimit(cfg *config.SecurityConfig, log *zap.Logger) (gin.HandlerFunc, fu
 	return handler, stop
 }
 
+// MaxConcurrent returns a middleware that caps the number of requests processed
+// simultaneously. When n slots are occupied, excess requests receive 503
+// (Service Unavailable) immediately rather than queuing. This bounds peak
+// memory from large biometric payloads under concurrency.
+// n <= 0 disables the limit (no-op middleware).
+func MaxConcurrent(n int) gin.HandlerFunc {
+	if n <= 0 {
+		return func(c *gin.Context) { c.Next() }
+	}
+	sem := make(chan struct{}, n)
+	return func(c *gin.Context) {
+		select {
+		case sem <- struct{}{}:
+			defer func() { <-sem }()
+			c.Next()
+		default:
+			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{
+				"error": "server busy, please retry",
+			})
+		}
+	}
+}
+
 // SecurityHeaders adds common HTTP security response headers to all responses.
 // These prevent MIME sniffing, clickjacking, and inadvertent caching of credentials.
 func SecurityHeaders() gin.HandlerFunc {

@@ -41,6 +41,11 @@ type ServerConfig struct {
 	// If empty the service falls back to scheme+bind address (dev only).
 	PublicBaseURL string    `yaml:"public_base_url" envconfig:"SERVER_PUBLIC_BASE_URL"`
 	TLS           TLSConfig `yaml:"tls"`
+	// MaxConcurrentBiometric limits the number of biometric requests
+	// (process-request, liveness, id-scan, session-token) processed at once.
+	// Each request amplifies payload size ~3-4× in memory; this cap prevents
+	// OOM under sustained concurrency. 0 means unlimited.
+	MaxConcurrentBiometric int `yaml:"max_concurrent_biometric" envconfig:"SERVER_MAX_CONCURRENT_BIOMETRIC"`
 }
 
 // TLSConfig enables TLS on the HTTP listener.
@@ -275,8 +280,9 @@ func (c *Config) loadSecrets() error {
 func defaultConfig() *Config {
 	return &Config{
 		Server: ServerConfig{
-			Host: "0.0.0.0",
-			Port: 8080,
+			Host:                   "0.0.0.0",
+			Port:                   8080,
+			MaxConcurrentBiometric: 10,
 		},
 		FaceTec: FaceTecConfig{
 			Timeout: 30 * time.Second,
