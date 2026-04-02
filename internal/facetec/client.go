@@ -18,7 +18,9 @@ type Client struct {
 
 // NewClient creates a FaceTec Server client.
 // serverURL must be the base URL of the FaceTec Server (e.g. "https://facetec.example.org").
-// deviceKey is the FaceTec device SDK key used to authenticate requests.
+// deviceKey is the FaceTec device SDK key. When non-empty it is sent as the
+// X-Device-Key request header. It is only required by the FaceTec Testing API
+// and can be omitted when connecting to your own FaceTec Server (v10+).
 func NewClient(serverURL, deviceKey string, httpClient *http.Client) *Client {
 	return &Client{
 		serverURL:  serverURL,
@@ -80,6 +82,25 @@ func (c *Client) SubmitIDScan(ctx context.Context, req *IDScanRequest) (*IDScanR
 	return &result, nil
 }
 
+// ProcessRequest forwards an opaque FaceTec request blob to the FaceTec Server.
+// The response payload is returned as a generic JSON object so the HTTP layer can
+// preserve FaceTec's SDK-facing contract while augmenting it with app metadata.
+func (c *Client) ProcessRequest(ctx context.Context, req *ProcessRequestRequest) (map[string]any, error) {
+	resp, err := c.post(ctx, "/process-request", req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("facetec: process-request: unexpected status %d", resp.StatusCode)
+	}
+	var result map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("facetec: process-request: decode response: %w", err)
+	}
+	return result, nil
+}
+
 func (c *Client) post(ctx context.Context, path string, body any) (*http.Response, error) {
 	var buf bytes.Buffer
 	if body != nil {
@@ -92,6 +113,8 @@ func (c *Client) post(ctx context.Context, path string, body any) (*http.Respons
 		return nil, fmt.Errorf("facetec: build request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Device-Key", c.deviceKey)
+	if c.deviceKey != "" {
+		req.Header.Set("X-Device-Key", c.deviceKey)
+	}
 	return c.httpClient.Do(req)
 }

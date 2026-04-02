@@ -54,7 +54,9 @@ type TLSConfig struct {
 type FaceTecConfig struct {
 	// ServerURL is the base URL of the FaceTec Server (required).
 	ServerURL string `yaml:"server_url"      envconfig:"FACETEC_SERVER_URL"`
-	// DeviceKey is the FaceTec SDK device key (required).
+	// DeviceKey is the FaceTec SDK device key (optional).
+	// Required only when connecting to the FaceTec Testing API; omit when using
+	// your own FaceTec Server (v10+).
 	DeviceKey string `yaml:"device_key"      envconfig:"FACETEC_DEVICE_KEY"`
 	// DeviceKeyPath loads DeviceKey from a file (takes precedence over DeviceKey if set).
 	DeviceKeyPath string        `yaml:"device_key_path" envconfig:"FACETEC_DEVICE_KEY_PATH"`
@@ -201,9 +203,6 @@ func Load(path string) (*Config, error) {
 func (c *Config) Validate() error {
 	if c.FaceTec.ServerURL == "" {
 		return fmt.Errorf("config: facetec.server_url is required")
-	}
-	if c.FaceTec.DeviceKey == "" {
-		return fmt.Errorf("config: facetec.device_key is required (set directly or via device_key_path)")
 	}
 	if c.Issuer.Addr == "" {
 		return fmt.Errorf("config: issuer.addr is required")

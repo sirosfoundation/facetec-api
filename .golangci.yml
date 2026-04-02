@@ -10,6 +10,10 @@ formatters:
   enable:
     - gofmt
     - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/sirosfoundation/facetec-api
 
 linters:
   enable:
@@ -22,27 +26,22 @@ linters:
   disable:
     - exhaustive
     - unparam
-
-linters-settings:
-  errcheck:
-    check-type-assertions: true
-    check-blank: false
-  govet:
-    enable-all: true
-    disable:
-      - fieldalignment
-  goimports:
-    local-prefixes: github.com/sirosfoundation/facetec-api
-
-issues:
-  max-issues-per-linter: 0
-  max-same-issues: 0
-  exclude-rules:
-    # HTTP response body close in defer — best effort
-    - linters:
-        - errcheck
-      text: "resp\\.Body\\.Close"
-    # zap logger sync on exit — best effort
-    - linters:
-        - errcheck
-      text: "log\\.Sync"
+  settings:
+    errcheck:
+      check-type-assertions: true
+      check-blank: false
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment
+        - shadow
+  exclusions:
+    rules:
+      # HTTP response body close in defer - best effort
+      - linters:
+          - errcheck
+        text: "resp\\.Body\\.Close"
+      # zap logger sync on exit - best effort
+      - linters:
+          - errcheck
+        text: "log\\.Sync"

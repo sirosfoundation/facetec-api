@@ -109,7 +109,8 @@ func TestAppKeyAuth_BearerPrefixRequired(t *testing.T) {
 
 func TestRateLimit_DisabledIsNoOp(t *testing.T) {
 	cfg := &config.SecurityConfig{RateLimit: config.RateLimitConfig{Enabled: false}}
-	r := newRouter(middleware.RateLimit(cfg, zap.NewNop()))
+	rl, _ := middleware.RateLimit(cfg, zap.NewNop())
+	r := newRouter(rl)
 	if w := get(r); w.Code != http.StatusOK {
 		t.Errorf("expected 200 (no-op), got %d", w.Code)
 	}
@@ -119,7 +120,8 @@ func TestRateLimit_ZeroRPMIsNoOp(t *testing.T) {
 	cfg := &config.SecurityConfig{
 		RateLimit: config.RateLimitConfig{Enabled: true, RequestsPerMinute: 0},
 	}
-	r := newRouter(middleware.RateLimit(cfg, zap.NewNop()))
+	rl, _ := middleware.RateLimit(cfg, zap.NewNop())
+	r := newRouter(rl)
 	if w := get(r); w.Code != http.StatusOK {
 		t.Errorf("expected 200 (no-op), got %d", w.Code)
 	}
@@ -129,7 +131,9 @@ func TestRateLimit_AllowsWithinLimit(t *testing.T) {
 	cfg := &config.SecurityConfig{
 		RateLimit: config.RateLimitConfig{Enabled: true, RequestsPerMinute: 5},
 	}
-	r := newRouter(middleware.RateLimit(cfg, zap.NewNop()))
+	rl, stop := middleware.RateLimit(cfg, zap.NewNop())
+	defer stop()
+	r := newRouter(rl)
 	for i := range 5 {
 		if w := get(r); w.Code != http.StatusOK {
 			t.Errorf("request %d: expected 200, got %d", i+1, w.Code)
@@ -137,11 +141,13 @@ func TestRateLimit_AllowsWithinLimit(t *testing.T) {
 	}
 }
 
-func TestRateLimit_Blocks_WhenExceeded(t *testing.T) {
+func TestRateLimit_BlocksWhenExceeded(t *testing.T) {
 	cfg := &config.SecurityConfig{
 		RateLimit: config.RateLimitConfig{Enabled: true, RequestsPerMinute: 2},
 	}
-	r := newRouter(middleware.RateLimit(cfg, zap.NewNop()))
+	rl, stop := middleware.RateLimit(cfg, zap.NewNop())
+	defer stop()
+	r := newRouter(rl)
 	codes := make([]int, 4)
 	for i := range 4 {
 		codes[i] = get(r).Code
@@ -206,7 +212,7 @@ func makeJWT(t *testing.T, secret, issuer, tenantID string) string {
 }
 
 // TestTenantAuth_DevMode passes all requests without any auth header.
-func TestTenantAuth_DevMode_PassThrough(t *testing.T) {
+func TestTenantAuth_DevModePassThrough(t *testing.T) {
 	reg := buildTestRegistry(t)
 	cfg := &config.Config{} // no JWT.Secret, no Security.AppKey
 	r := newRouter(middleware.TenantAuth(reg, cfg, zap.NewNop()))

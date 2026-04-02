@@ -31,7 +31,7 @@ make build
 
 # Run with an example config (no TLS, no real FaceTec server)
 cp configs/config.yaml configs/config.local.yaml
-# Edit configs/config.local.yaml with your FaceTec Server URL, device key, and issuer address.
+# Edit configs/config.local.yaml with your FaceTec Server URL and issuer address.
 make run CONFIG=configs/config.local.yaml
 ```
 
@@ -59,8 +59,8 @@ by environment variables. The full annotated reference is [configs/config.yaml](
 | `server.tls.cert_file` | `SERVER_TLS_CERT_FILE` | *(empty)* | TLS certificate file |
 | `server.tls.key_file` | `SERVER_TLS_KEY_FILE` | *(empty)* | TLS private key file |
 | `facetec.server_url` | `FACETEC_SERVER_URL` | *(required)* | FaceTec Server base URL |
-| `facetec.device_key` | `FACETEC_DEVICE_KEY` | *(required)* | FaceTec SDK device key (set directly or via `device_key_path`) |
-| `facetec.device_key_path` | `FACETEC_DEVICE_KEY_PATH` | *(optional)* | File containing the FaceTec device key |
+| `facetec.device_key` | `FACETEC_DEVICE_KEY` | *(optional)* | FaceTec device key; sent as `X-Device-Key`. Only required by the FaceTec Testing API — omit when using your own FaceTec Server (v10+) |
+| `facetec.device_key_path` | `FACETEC_DEVICE_KEY_PATH` | *(optional)* | File containing the FaceTec device key (takes precedence over `device_key`) |
 | `facetec.timeout` | `FACETEC_TIMEOUT` | `30s` | HTTP timeout for FaceTec Server requests |
 | `facetec.tls.skip_verify` | `FACETEC_TLS_SKIP_VERIFY` | `false` | Disable cert verification — **never use in production** |
 | `facetec.tls.ca_file` | `FACETEC_TLS_CA_FILE` | *(optional)* | CA certificate for outbound FaceTec TLS |
@@ -78,6 +78,10 @@ by environment variables. The full annotated reference is [configs/config.yaml](
 | `session.offer_ttl` | `SESSION_OFFER_TTL` | `5m` | How long a credential offer is held in memory |
 | `logging.level` | `LOG_LEVEL` | `info` | Log level: `debug`, `info`, `warn`, `error` |
 | `logging.production` | `LOG_PRODUCTION` | `false` | Enable JSON structured logging (recommended in prod) |
+
+Numeric acceptance thresholds are encoded in the SPOCP rule files themselves rather than as
+separate config keys. This keeps deployment policy in one place and allows per-tenant rule sets
+to express score requirements such as liveness and face-match minima.
 
 ### Authentication
 
@@ -147,12 +151,41 @@ is configured. `/livez` and `/readyz` are always unauthenticated.
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET`  | `/v1/health` | Returns `200 {"status":"ok"}` — useful as a credential smoke-test |
+| `POST` | `/process-request` | FaceTec-compatible requestBlob/responseBlob endpoint; augments successful matches with offer metadata |
+| `POST` | `/v1/process-request` | Versioned alias of `/process-request` |
 | `POST` | `/v1/session-token` | Obtain a short-lived FaceTec session token |
 | `POST` | `/v1/liveness` | Submit a liveness FaceScan; returns `livenessSessionId` |
 | `POST` | `/v1/id-scan` | Submit a photo ID scan; returns `transactionId` + `credentialOfferURI` |
 | `GET`  | `/v1/offer/:txid` | Redeem a one-time credential offer (wallet pull) |
 
 ### Biometric flow
+
+Two mobile-facing contracts are supported:
+
+1. FaceTec-native processor flow via `/process-request` or `/v1/process-request`
+2. Legacy split flow via `/v1/session-token`, `/v1/liveness`, and `/v1/id-scan`
+
+The FaceTec-native flow is the recommended integration for mobile SDKs that already use the sample
+`SessionRequestProcessor` pattern.
+
+### FaceTec-native flow
+
+```
+1. POST /process-request
+  → { "requestBlob": "...", "externalDatabaseRefID": "..." }
+  ← { "responseBlob": "...", "result": { ... }, "transactionId": "...",
+     "credentialOfferURI": "openid-credential-offer://?..." }
+
+2. GET /v1/offer/:transactionId
+  ← { "credentials": ["<signed-token>"], "scope": "..." }
+```
+
+`/process-request` preserves FaceTec's upstream response JSON. When the upstream payload represents
+a successful photo-ID match and local policy accepts it, facetec-api augments that response with
+`transactionId` and `credentialOfferURI`. If policy or issuance fails, the response still contains
+the upstream `responseBlob` and instead adds `credentialIssueError`.
+
+### Legacy split flow
 
 ```
 1. POST /v1/session-token
@@ -173,13 +206,20 @@ is configured. `/livez` and `/readyz` are always unauthenticated.
 
 Steps 2 and 3 are independently rate-limited per source IP.
 
+For FaceTec sample-app style integrations, use `/process-request` and send the
+SDK-generated `requestBlob` unchanged. The service returns FaceTec's response JSON
+unchanged, and on successful photo-ID matches also attaches `transactionId` and
+`credentialOfferURI` so the wallet can redeem the issued credential.
+
 ## SPOCP Policy Rules
 
 Scan acceptance is a two-stage process:
 
-1. **Numeric thresholds** — encoded directly in `.spoc` rule files as SPOCP range predicates.
-2. **Categorical SPOCP rules** (`.spoc` files in `policy.rules_dir`) — S-expressions that encode
-   which combinations of document type and verification flags are acceptable.
+1. **Score thresholds** — encoded directly in SPOCP range predicates such as
+  `(liveness-score (* range numeric ge 080))` and
+  `(face-match-level (* range numeric ge 06))`.
+2. **Categorical rules** (`.spoc` files in `policy.rules_dir`) — S-expressions that encode which
+  combinations of document type and verification flags are acceptable.
 
 Rules are loaded at startup (and re-loaded on SIGHUP). If the rules directory is empty or
 `policy.rules_dir` is unset, the service starts but rejects all scans and reports not-ready.

@@ -21,10 +21,11 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/sirosfoundation/facetec-api/internal/facetec"
 	spocp "github.com/sirosfoundation/go-spocp"
 	"github.com/sirosfoundation/go-spocp/pkg/persist"
 	"github.com/sirosfoundation/go-spocp/pkg/sexp"
+
+	"github.com/sirosfoundation/facetec-api/internal/facetec"
 )
 
 // Engine wraps a go-spocp Engine for scan policy evaluation.
