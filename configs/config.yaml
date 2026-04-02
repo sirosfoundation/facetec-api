@@ -7,6 +7,10 @@ server:
   host: "0.0.0.0"
   port: 8080
 
+  # Externally reachable base URL; used when constructing credential offer URIs.
+  # If empty, the service falls back to the bind address (development only).
+  # public_base_url: "https://facetec-api.example.org"
+
   # TLS — disable for local development, always enable in production.
   tls:
     enabled: false
@@ -24,6 +28,13 @@ facetec:
 
   # HTTP timeout for FaceTec Server requests.
   timeout: "30s"
+
+  # TLS configuration for the outbound HTTPS connection to the FaceTec Server.
+  tls:
+    # skip_verify: false    # Disable cert verification — NEVER use in production.
+    # ca_file:     "/etc/facetec-api/facetec-ca.crt"  # Custom CA certificate.
+    # cert_file:   "/etc/facetec-api/client.crt"       # Client certificate for mTLS.
+    # key_file:    "/etc/facetec-api/client.key"        # Client private key for mTLS.
 
 # ── vc Credential Issuer (gRPC) ───────────────────────────────────────────────
 issuer:
@@ -114,5 +125,3 @@ logging:
 #       format: mdoc
 #     policy:
 #       rules_dir: "/etc/facetec-api/rules/gov"
-#       min_liveness_score: 92
-#       min_face_match_level: 9
