@@ -116,5 +116,9 @@ func (c *Client) post(ctx context.Context, path string, body any) (*http.Respons
 	if c.deviceKey != "" {
 		req.Header.Set("X-Device-Key", c.deviceKey)
 	}
-	return c.httpClient.Do(req)
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("facetec: post %s: %w", path, err)
+	}
+	return resp, nil
 }
