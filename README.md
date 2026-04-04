@@ -5,7 +5,7 @@
 [![Go Report Card](https://goreportcard.com/badge/github.com/sirosfoundation/facetec-api)](https://goreportcard.com/report/github.com/sirosfoundation/facetec-api)
 [![Go](https://img.shields.io/badge/go-1.25-00ADD8?logo=go&logoColor=white)](https://go.dev/dl/)
 [![License](https://img.shields.io/badge/license-BSD--2--Clause-blue)](LICENSE)
-[![Docker](https://img.shields.io/badge/registry-registry.siros.org-2496ED?logo=docker&logoColor=white)](https://registry.siros.org/sirosfoundation/facetec-api)
+[![Docker](https://img.shields.io/badge/ghcr.io-facetec--api-2496ED?logo=docker&logoColor=white)](https://ghcr.io/sirosfoundation/facetec-api)
 
 A Go microservice that bridges the [FaceTec](https://www.facetec.com/) biometric SDK (running
 on a mobile device) with a verifiable-credential (VC) issuer. It acts as a security gateway:
