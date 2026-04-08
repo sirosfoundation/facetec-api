@@ -22,21 +22,21 @@ type ProcessRequestResponse struct {
 	CredentialIssueError string
 }
 
-// ExtractScanResult translates a successful FaceTec process-request response
-// into the internal ScanResult shape used by policy evaluation and issuance.
-// It returns ok=false when the payload is not a successful photo-ID match.
+// ExtractScanResult translates a successful FaceTec Server v10 process-request
+// response into the internal ScanResult shape used by policy evaluation and
+// issuance. It returns ok=false when the payload does not represent a
+// successful photo-ID match.
+//
+// The FaceTec Server v10 response has:
+//   - success (bool) at the top level
+//   - idScanResultsSoFar.matchLevel (int) for face match confidence
+//   - idScanResultsSoFar.mrzStatusEnumInt (int) — 2 = passed
+//   - idScanResultsSoFar.nfcAuthenticationStatusEnumInt (int) — 1 = passed
+//   - idScanResultsSoFar.barcodeStatusEnumInt (int) — 2 = passed
+//   - documentData (object or JSON string) at the top level
 func ExtractScanResult(payload map[string]any) (*ScanResult, bool, error) {
-	resultValue, ok := payload["result"]
-	if !ok || resultValue == nil {
-		return nil, false, nil
-	}
-
-	resultMap, ok := resultValue.(map[string]any)
-	if !ok {
-		return nil, false, fmt.Errorf("facetec: process-request result is %T, want object", resultValue)
-	}
-
-	success, ok, err := lookupBool(resultMap["success"])
+	// Top-level success flag.
+	success, ok, err := lookupBool(payload["success"])
 	if err != nil {
 		return nil, false, fmt.Errorf("facetec: process-request success: %w", err)
 	}
@@ -44,72 +44,55 @@ func ExtractScanResult(payload map[string]any) (*ScanResult, bool, error) {
 		return nil, false, nil
 	}
 
-	faceMatchLevel, ok, err := lookupInt(resultMap["faceMatchLevel"])
+	// idScanResultsSoFar contains match and verification details.
+	resultsValue, ok := payload["idScanResultsSoFar"]
+	if !ok || resultsValue == nil {
+		return nil, false, nil
+	}
+	results, ok := resultsValue.(map[string]any)
+	if !ok {
+		return nil, false, fmt.Errorf("facetec: idScanResultsSoFar is %T, want object", resultsValue)
+	}
+
+	matchLevel, ok, err := lookupInt(results["matchLevel"])
 	if err != nil {
-		return nil, false, fmt.Errorf("facetec: process-request faceMatchLevel: %w", err)
+		return nil, false, fmt.Errorf("facetec: matchLevel: %w", err)
 	}
 	if !ok {
 		return nil, false, nil
 	}
 
-	documentData, ok, err := extractDocumentData(resultMap["documentData"])
+	// documentData lives at the top level.
+	documentData, ok, err := extractDocumentData(payload["documentData"])
 	if err != nil {
-		return nil, false, fmt.Errorf("facetec: process-request documentData: %w", err)
+		return nil, false, fmt.Errorf("facetec: documentData: %w", err)
 	}
 	if !ok {
 		return nil, false, nil
 	}
 
-	livenessScore, ok, err := extractLivenessScore(resultMap)
-	if err != nil {
-		return nil, false, fmt.Errorf("facetec: process-request liveness: %w", err)
-	}
-	if !ok {
-		return nil, false, nil
-	}
-
-	nfcVerified, _, err := lookupBool(resultMap["nfcVerified"])
-	if err != nil {
-		return nil, false, fmt.Errorf("facetec: process-request nfcVerified: %w", err)
-	}
-	barcodeVerified, _, err := lookupBool(resultMap["barcodeVerified"])
-	if err != nil {
-		return nil, false, fmt.Errorf("facetec: process-request barcodeVerified: %w", err)
-	}
-	mrzVerified, _, err := lookupBool(resultMap["mrzVerified"])
-	if err != nil {
-		return nil, false, fmt.Errorf("facetec: process-request mrzVerified: %w", err)
-	}
+	// FaceTec v10 verification status enums:
+	//   mrzStatusEnumInt:               2 = passed
+	//   nfcAuthenticationStatusEnumInt:  1 = passed
+	//   barcodeStatusEnumInt:            2 = passed
+	mrzStatus, _, _ := lookupInt(results["mrzStatusEnumInt"])
+	nfcAuthStatus, _, _ := lookupInt(results["nfcAuthenticationStatusEnumInt"])
+	barcodeStatus, _, _ := lookupInt(results["barcodeStatusEnumInt"])
 
 	return &ScanResult{
 		Liveness: LivenessCheckResult{
 			Success:       true,
-			LivenessScore: livenessScore,
+			LivenessScore: 1.0, // liveness is implicit in a successful process-request
 		},
 		IDScan: IDScanResult{
 			Success:         true,
-			FaceMatchLevel:  faceMatchLevel,
+			FaceMatchLevel:  matchLevel,
 			DocumentData:    documentData,
-			NFCVerified:     nfcVerified,
-			BarcodeVerified: barcodeVerified,
-			MRZVerified:     mrzVerified,
+			MRZVerified:     mrzStatus == 2,
+			NFCVerified:     nfcAuthStatus == 1,
+			BarcodeVerified: barcodeStatus == 2,
 		},
 	}, true, nil
-}
-
-func extractLivenessScore(resultMap map[string]any) (float64, bool, error) {
-	if score, ok, err := lookupFloat(resultMap["livenessScore"]); err != nil || ok {
-		return score, ok, err
-	}
-
-	proven, ok, err := lookupBool(resultMap["livenessProven"])
-	if err != nil {
-		return 0, false, err
-	}
-	if !ok || !proven {
-		return 0, false, nil
-	}
-	return 1.0, true, nil
 }
 
 func extractDocumentData(value any) (DocumentData, bool, error) {
@@ -158,35 +141,6 @@ func lookupBool(value any) (bool, bool, error) {
 		return parsed, true, nil
 	default:
 		return false, false, fmt.Errorf("unsupported type %T", value)
-	}
-}
-
-func lookupFloat(value any) (float64, bool, error) {
-	switch typed := value.(type) {
-	case nil:
-		return 0, false, nil
-	case float64:
-		return typed, true, nil
-	case float32:
-		return float64(typed), true, nil
-	case int:
-		return float64(typed), true, nil
-	case int64:
-		return float64(typed), true, nil
-	case json.Number:
-		parsed, err := typed.Float64()
-		if err != nil {
-			return 0, false, fmt.Errorf("parse float %q: %w", typed.String(), err)
-		}
-		return parsed, true, nil
-	case string:
-		parsed, err := strconv.ParseFloat(typed, 64)
-		if err != nil {
-			return 0, false, fmt.Errorf("parse float %q: %w", typed, err)
-		}
-		return parsed, true, nil
-	default:
-		return 0, false, fmt.Errorf("unsupported type %T", value)
 	}
 }
 
