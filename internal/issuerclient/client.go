@@ -13,7 +13,9 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+	"net/url"
 	"os"
+	"strings"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -172,8 +174,10 @@ func (c *Client) Close() error {
 }
 
 func dial(cfg TLSConfig) (*grpc.ClientConn, error) {
+	addr := normalizeGRPCAddr(cfg.Addr, cfg.TLS)
+
 	if !cfg.TLS {
-		return grpc.NewClient(cfg.Addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		return grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	}
 
 	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12}
@@ -202,5 +206,29 @@ func dial(cfg TLSConfig) (*grpc.ClientConn, error) {
 		tlsConfig.ServerName = cfg.ServerName
 	}
 
-	return grpc.NewClient(cfg.Addr, grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)))
+	return grpc.NewClient(addr, grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)))
+}
+
+// normalizeGRPCAddr strips URL schemes (https://, http://) from addresses
+// that were meant for gRPC (which expects host:port, not URLs). If no port
+// is present, it defaults to 443 for TLS and 8090 for plaintext.
+func normalizeGRPCAddr(addr string, useTLS bool) string {
+	// Strip scheme if present.
+	if u, err := url.Parse(addr); err == nil && (u.Scheme == "https" || u.Scheme == "http") {
+		host := u.Host
+		if host == "" {
+			host = u.Path // url.Parse("https://host") puts host in Path when no trailing /
+		}
+		addr = host
+	}
+
+	// Ensure a port is present.
+	if !strings.Contains(addr, ":") {
+		if useTLS {
+			addr += ":443"
+		} else {
+			addr += ":8090"
+		}
+	}
+	return addr
 }
