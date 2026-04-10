@@ -81,18 +81,25 @@ type FaceTecTLSConfig struct {
 	KeyFile  string `yaml:"key_file"    envconfig:"FACETEC_TLS_KEY_FILE"`
 }
 
-// IssuerConfig holds the gRPC connection details for the vc credential issuer.
+// IssuerConfig holds connection details for the vc apigw REST API.
 type IssuerConfig struct {
-	// Addr is the gRPC address of the vc issuer (e.g. "issuer:8090").
+	// Addr is the base URL of the vc apigw (e.g. "https://didrik.issuer.id.siros.org").
 	Addr     string `yaml:"addr"      envconfig:"ISSUER_ADDR"`
 	TLS      bool   `yaml:"tls"       envconfig:"ISSUER_TLS"`
 	CAFile   string `yaml:"ca_file"   envconfig:"ISSUER_CA_FILE"`
 	CertFile string `yaml:"cert_file" envconfig:"ISSUER_CERT_FILE"`
 	KeyFile  string `yaml:"key_file"  envconfig:"ISSUER_KEY_FILE"`
-	// Scope is the credential scope passed to MakeSDJWT / MakeMDoc.
+	// APIKey is an optional Bearer token for authenticated apigw endpoints.
+	APIKey     string `yaml:"api_key"     envconfig:"ISSUER_API_KEY"`
+	APIKeyPath string `yaml:"api_key_path" envconfig:"ISSUER_API_KEY_PATH"`
+	// Scope is the credential scope passed to the upload request.
 	Scope string `yaml:"scope"   envconfig:"ISSUER_SCOPE"`
 	// Format selects the credential format: sdjwt (default), mdoc, or vc20.
 	Format string `yaml:"format"  envconfig:"ISSUER_FORMAT"`
+	// AuthenticSource identifies the source system in the vc apigw.
+	AuthenticSource string `yaml:"authentic_source" envconfig:"ISSUER_AUTHENTIC_SOURCE"`
+	// VCT is the Verifiable Credential Type for uploads.
+	VCT string `yaml:"vct" envconfig:"ISSUER_VCT"`
 }
 
 // PolicyConfig points to the directory of .spoc rule files.
@@ -273,6 +280,13 @@ func (c *Config) loadSecrets() error {
 			return fmt.Errorf("config: read jwt.secret_path: %w", err)
 		}
 		c.JWT.Secret = strings.TrimSpace(string(data))
+	}
+	if c.Issuer.APIKeyPath != "" {
+		data, err := os.ReadFile(c.Issuer.APIKeyPath)
+		if err != nil {
+			return fmt.Errorf("config: read issuer.api_key_path: %w", err)
+		}
+		c.Issuer.APIKey = strings.TrimSpace(string(data))
 	}
 	return nil
 }

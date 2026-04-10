@@ -7,7 +7,8 @@
 //     and issuer parameters from the JWT tenant_id claim on the request context.
 //  3. SPOCP policy engine (per tenant) — evaluates each scan result against
 //     numeric thresholds and categorical rules before issuing a credential.
-//  4. VC issuer gRPC client — issues the signed credential once policy passes.
+//  4. VC apigw REST client — uploads document data and triggers credential
+//     offer generation once policy passes.
 //
 // All biometric data (FaceMap templates, raw scan images) is held exclusively
 // in an in-memory session store ([session.Manager]) and is never written to disk.
@@ -22,6 +23,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -57,13 +59,14 @@ func New(_ context.Context, cfg *config.Config, registry *tenant.Registry, log *
 
 	ses := session.New(cfg.Session.LivenessTTL, cfg.Session.OfferTTL)
 
-	log.Info("connecting to vc issuer", zap.String("addr", cfg.Issuer.Addr), zap.Bool("tls", cfg.Issuer.TLS))
-	issuer, err := issuerclient.New(issuerclient.TLSConfig{
-		Addr:         cfg.Issuer.Addr,
-		TLS:          cfg.Issuer.TLS,
-		CAFilePath:   cfg.Issuer.CAFile,
-		CertFilePath: cfg.Issuer.CertFile,
-		KeyFilePath:  cfg.Issuer.KeyFile,
+	log.Info("connecting to vc issuer", zap.String("addr", cfg.Issuer.Addr))
+	issuer, err := issuerclient.New(issuerclient.Config{
+		BaseURL:  cfg.Issuer.Addr,
+		APIKey:   cfg.Issuer.APIKey,
+		TLS:      cfg.Issuer.TLS,
+		CAFile:   cfg.Issuer.CAFile,
+		CertFile: cfg.Issuer.CertFile,
+		KeyFile:  cfg.Issuer.KeyFile,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("apiv1: connect to vc issuer at %q: %w", cfg.Issuer.Addr, err)
@@ -254,7 +257,7 @@ func (c *Client) RedeemOffer(ctx context.Context, txID string) (*session.OfferEn
 }
 
 // Close stops the session manager (zeroing all in-memory biometric data) and
-// releases the gRPC connection to the vc issuer.
+// releases the HTTP client to the vc apigw.
 func (c *Client) Close(_ context.Context) error {
 	c.sessions.Close()
 	return c.issuer.Close()
@@ -284,43 +287,57 @@ func (c *Client) issueCredential(ctx context.Context, result facetec.ScanResult,
 	if err != nil {
 		return "", fmt.Errorf("marshal document data: %w", err)
 	}
-
-	var credentials []string
-
-	switch issuer.Format {
-	case "mdoc":
-		resp, err := c.issuer.MakeMDoc(ctx, issuerclient.MakeMDocRequest{
-			Scope:        issuer.Scope,
-			DocType:      "org.iso.18013.5.1.mDL",
-			DocumentData: data,
-		})
-		if err != nil {
-			return "", fmt.Errorf("MakeMDoc: %w", err)
-		}
-		credentials = []string{string(resp.MDoc)}
-
-	case "vc20":
-		resp, err := c.issuer.MakeVC20(ctx, issuerclient.MakeVC20Request{
-			Scope:        issuer.Scope,
-			DocumentData: data,
-		})
-		if err != nil {
-			return "", fmt.Errorf("MakeVC20: %w", err)
-		}
-		credentials = []string{string(resp.Credential)}
-
-	default: // sdjwt
-		resp, err := c.issuer.MakeSDJWT(ctx, issuerclient.MakeSDJWTRequest{
-			Scope:        issuer.Scope,
-			DocumentData: data,
-		})
-		if err != nil {
-			return "", fmt.Errorf("MakeSDJWT: %w", err)
-		}
-		credentials = resp.Credentials
+	var docDataMap map[string]any
+	if err := json.Unmarshal(data, &docDataMap); err != nil {
+		return "", fmt.Errorf("unmarshal document data: %w", err)
 	}
 
-	return c.sessions.PutOffer(credentials, issuer.Scope)
+	authenticSource := c.cfg.Issuer.AuthenticSource
+	if authenticSource == "" {
+		authenticSource = "facetec-api"
+	}
+	vct := c.cfg.Issuer.VCT
+	if vct == "" {
+		vct = issuer.Scope
+	}
+
+	documentID := fmt.Sprintf("ft-%d", time.Now().UnixNano())
+
+	uploadReq := &issuerclient.UploadRequest{
+		Meta: &issuerclient.MetaData{
+			AuthenticSource: authenticSource,
+			DocumentVersion: "1.0.0",
+			VCT:             vct,
+			Scope:           issuer.Scope,
+			DocumentID:      documentID,
+			RealData:        true,
+		},
+		DocumentData:        docDataMap,
+		DocumentDataVersion: "1.0.0",
+	}
+
+	if err := c.issuer.Upload(ctx, uploadReq); err != nil {
+		return "", fmt.Errorf("upload: %w", err)
+	}
+
+	notifReq := &issuerclient.NotificationRequest{
+		AuthenticSource: authenticSource,
+		VCT:             vct,
+		DocumentID:      documentID,
+	}
+
+	notifReply, err := c.issuer.Notification(ctx, notifReq)
+	if err != nil {
+		return "", fmt.Errorf("notification: %w", err)
+	}
+
+	if notifReply.Data == nil || notifReply.Data.DeepLink == "" {
+		return "", fmt.Errorf("notification: no credential offer returned")
+	}
+
+	// Store the deep link as the credential offer URI. The wallet will use
+	// the apigw's OID4VCI flow directly via this URI.
+	return c.sessions.PutOffer([]string{notifReply.Data.DeepLink}, issuer.Scope)
 }
 
 // buildFaceTecHTTPClient constructs an *http.Client with the TLS configuration
