@@ -39,8 +39,9 @@ type stubApiv1 struct {
 	livenessID  string
 	livenessErr error
 
-	idScanID  string
-	idScanErr error
+	idScanID       string
+	idScanOfferURL string
+	idScanErr      error
 
 	processResp *facetec.ProcessRequestResponse
 	processErr  error
@@ -75,17 +76,21 @@ func (s *stubApiv1) SubmitLiveness(_ context.Context, _ *facetec.LivenessCheckRe
 	return id, nil
 }
 
-func (s *stubApiv1) SubmitIDScan(_ context.Context, _ string, _ *facetec.IDScanRequest) (string, error) {
+func (s *stubApiv1) SubmitIDScan(_ context.Context, _ string, _ *facetec.IDScanRequest) (string, string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.idScanErr != nil {
-		return "", s.idScanErr
+		return "", "", s.idScanErr
 	}
 	id := s.idScanID
 	if id == "" {
 		id = "offer-tx-id"
 	}
-	return id, nil
+	offerURL := s.idScanOfferURL
+	if offerURL == "" {
+		offerURL = "openid-credential-offer://?credential_offer_uri=https://issuer.example.com/credential-offer/test-uuid"
+	}
+	return id, offerURL, nil
 }
 
 func (s *stubApiv1) ProcessRequest(_ context.Context, _ *facetec.ProcessRequestRequest) (*facetec.ProcessRequestResponse, error) {
@@ -313,7 +318,8 @@ func TestProcessRequest_Success(t *testing.T) {
 					"success": true,
 				},
 			},
-			TransactionID: "tx-process-1",
+			TransactionID:      "tx-process-1",
+			CredentialOfferURL: "openid-credential-offer://?credential_offer_uri=https://issuer.example.com/credential-offer/test-uuid",
 		},
 	}
 	ts := newTestServer(t, stub, "")

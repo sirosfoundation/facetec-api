@@ -6,7 +6,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 
-	"github.com/sirosfoundation/facetec-api/internal/config"
 	"github.com/sirosfoundation/facetec-api/internal/facetec"
 )
 
@@ -65,7 +64,7 @@ func (s *Service) endpointProcessRequest(c *gin.Context) {
 
 	if resp.TransactionID != "" {
 		resp.Payload["transactionId"] = resp.TransactionID
-		resp.Payload["credentialOfferURI"] = buildOfferURI(s.cfg.Server, resp.TransactionID)
+		resp.Payload["credentialOfferURI"] = resp.CredentialOfferURL
 	}
 	if resp.CredentialIssueError != "" {
 		resp.Payload["credentialIssueError"] = resp.CredentialIssueError
@@ -153,17 +152,16 @@ func (s *Service) endpointIDScan(c *gin.Context) {
 		// FaceMap is populated server-side by SubmitIDScan; never set from client input.
 	}
 
-	txID, err := s.apiv1.SubmitIDScan(c.Request.Context(), req.LivenessSessionID, ftReq)
+	docID, offerURL, err := s.apiv1.SubmitIDScan(c.Request.Context(), req.LivenessSessionID, ftReq)
 	if err != nil {
 		s.log.Info("id-scan flow failed", zap.Error(err))
 		s.fail(c, http.StatusUnprocessableEntity, err, "id-scan flow failed")
 		return
 	}
 
-	offerURI := buildOfferURI(s.cfg.Server, txID)
 	s.respond(c, http.StatusOK, idScanResponse{
-		TransactionID:      txID,
-		CredentialOfferURI: offerURI,
+		TransactionID:      docID,
+		CredentialOfferURI: offerURL,
 	})
 }
 
@@ -184,19 +182,4 @@ func (s *Service) endpointOffer(c *gin.Context) {
 		"credentials": entry.Credentials,
 		"scope":       entry.Scope,
 	})
-}
-
-// buildOfferURI constructs an OpenID4VCI credential offer URI.
-// If srv.PublicBaseURL is set it is used as the base (production deployments);
-// otherwise the service falls back to scheme + bind address (dev/local only).
-func buildOfferURI(srv config.ServerConfig, txID string) string {
-	base := srv.PublicBaseURL
-	if base == "" {
-		scheme := "http"
-		if srv.TLS.Enabled {
-			scheme = "https"
-		}
-		base = scheme + "://" + srv.Address()
-	}
-	return "openid-credential-offer://?credential_offer_uri=" + base + "/v1/offer/" + txID
 }
