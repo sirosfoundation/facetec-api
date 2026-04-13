@@ -51,22 +51,22 @@ type MetaData struct {
 	RealData        bool   `json:"real_data"`
 }
 
-// NotificationRequest is the body for POST /notification.
+// NotificationRequest is the body for POST /api/v1/notification.
 type NotificationRequest struct {
 	AuthenticSource string `json:"authentic_source"`
 	VCT             string `json:"vct"`
 	DocumentID      string `json:"document_id"`
 }
 
-// NotificationReply holds the credential offer data returned by /notification.
+// NotificationReply holds the credential offer data returned by /api/v1/notification.
 type NotificationReply struct {
 	Data *QRData `json:"data"`
 }
 
-// QRData holds the QR code and deep link from a notification response.
+// QRData holds the QR code and credential offer URL from a notification response.
 type QRData struct {
-	DeepLink string `json:"deep_link"`
-	Base64   string `json:"base64_image"`
+	CredentialOfferURL string `json:"credential_offer_url"`
+	QRBase64           string `json:"qr_base64"`
 }
 
 // Client is an HTTP client for the vc apigw.
@@ -104,7 +104,7 @@ func (c *Client) Upload(ctx context.Context, req *UploadRequest) error {
 
 // Notification requests a credential offer for a previously uploaded document.
 func (c *Client) Notification(ctx context.Context, req *NotificationRequest) (*NotificationReply, error) {
-	fullURL := c.baseURL + "/notification"
+	fullURL := c.baseURL + "/api/v1/notification"
 	reply := &NotificationReply{}
 	_, err := c.post(ctx, fullURL, req, reply)
 	if err != nil {
@@ -145,7 +145,7 @@ func (c *Client) post(ctx context.Context, u string, body any, result any) (*htt
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return resp, fmt.Errorf("HTTP %d from %s: %s", resp.StatusCode, u, truncate(respBody, 200))
+		return resp, fmt.Errorf("HTTP POST %s returned %d: %s", req.URL.Path, resp.StatusCode, truncate(respBody, 200))
 	}
 
 	if result != nil && len(respBody) > 0 {

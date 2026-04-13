@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
 
 	"github.com/sirosfoundation/facetec-api/internal/config"
@@ -38,6 +39,7 @@ func New(_ context.Context, cfg *config.Config, apiv1 Apiv1, registry *tenant.Re
 	router.Use(
 		gin.RecoveryWithWriter(nil), // panic recovery without body logging
 		middleware.SecurityHeaders(),
+		middleware.Prometheus("/livez", "/readyz", "/healthz", "/metrics"),
 		middleware.RequestLogger(log),
 	)
 
@@ -96,6 +98,10 @@ func (s *Service) registerRoutes(r *gin.Engine, registry *tenant.Registry) {
 	// Unauthenticated probes — always accessible.
 	r.GET("/livez", s.endpointLivez)
 	r.GET("/readyz", s.endpointReadyz)
+	r.GET("/healthz", s.endpointLivez)
+
+	// Prometheus metrics — unauthenticated, scraped by monitoring.
+	r.GET("/metrics", gin.WrapH(promhttp.Handler()))
 
 	// Versioned API — authentication + rate limiting applied to all routes.
 	auth := middleware.TenantAuth(registry, s.cfg, s.log)

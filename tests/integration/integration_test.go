@@ -10,8 +10,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -39,8 +41,9 @@ type stubApiv1 struct {
 	livenessID  string
 	livenessErr error
 
-	idScanID  string
-	idScanErr error
+	idScanID       string
+	idScanOfferURL string
+	idScanErr      error
 
 	processResp *facetec.ProcessRequestResponse
 	processErr  error
@@ -75,17 +78,21 @@ func (s *stubApiv1) SubmitLiveness(_ context.Context, _ *facetec.LivenessCheckRe
 	return id, nil
 }
 
-func (s *stubApiv1) SubmitIDScan(_ context.Context, _ string, _ *facetec.IDScanRequest) (string, error) {
+func (s *stubApiv1) SubmitIDScan(_ context.Context, _ string, _ *facetec.IDScanRequest) (string, string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.idScanErr != nil {
-		return "", s.idScanErr
+		return "", "", s.idScanErr
 	}
 	id := s.idScanID
 	if id == "" {
 		id = "offer-tx-id"
 	}
-	return id, nil
+	offerURL := s.idScanOfferURL
+	if offerURL == "" {
+		offerURL = "openid-credential-offer://?credential_offer_uri=https://issuer.example.com/credential-offer/test-uuid"
+	}
+	return id, offerURL, nil
 }
 
 func (s *stubApiv1) ProcessRequest(_ context.Context, _ *facetec.ProcessRequestRequest) (*facetec.ProcessRequestResponse, error) {
@@ -243,6 +250,27 @@ func TestReadyz(t *testing.T) {
 	assertStatus(t, resp, http.StatusOK)
 }
 
+func TestHealthz(t *testing.T) {
+	ts := newTestServer(t, &stubApiv1{}, "")
+	resp := getJSON(t, ts, "/healthz", "")
+	assertStatus(t, resp, http.StatusOK)
+}
+
+func TestMetrics_ReturnsPrometheusFormat(t *testing.T) {
+	ts := newTestServer(t, &stubApiv1{}, "")
+	resp := getJSON(t, ts, "/metrics", "")
+	assertStatus(t, resp, http.StatusOK)
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	// Prometheus text format must contain at least one HELP or TYPE line.
+	if !strings.Contains(string(body), "# HELP") && !strings.Contains(string(body), "# TYPE") {
+		t.Error("expected Prometheus text format with HELP/TYPE lines")
+	}
+}
+
 // ----------------------------------------------------------------------------
 // Auth middleware tests
 // ----------------------------------------------------------------------------
@@ -313,7 +341,8 @@ func TestProcessRequest_Success(t *testing.T) {
 					"success": true,
 				},
 			},
-			TransactionID: "tx-process-1",
+			TransactionID:      "tx-process-1",
+			CredentialOfferURL: "openid-credential-offer://?credential_offer_uri=https://issuer.example.com/credential-offer/test-uuid",
 		},
 	}
 	ts := newTestServer(t, stub, "")

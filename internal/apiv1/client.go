@@ -17,13 +17,14 @@ package apiv1
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
-	"time"
 
 	"go.uber.org/zap"
 
@@ -127,13 +128,13 @@ func (c *Client) SubmitLiveness(ctx context.Context, req *facetec.LivenessCheckR
 //  1. Retrieves and consumes the in-memory FaceMap ([]byte) for livenessSessionID.
 //  2. Forwards the combined request to the FaceTec Server (FaceMap converted to string for JSON).
 //  3. Immediately zeros the FaceMap bytes via defer.
-//  4. Evaluates the combined ScanResult against numeric thresholds + SPOCP policy.
-//  5. On policy pass, issues a credential via the vc gRPC issuer.
-//  6. Returns an opaque transaction ID redeemable via RedeemOffer.
-func (c *Client) SubmitIDScan(ctx context.Context, livenessSessionID string, idScanReq *facetec.IDScanRequest) (string, error) {
+//  4. Evaluates the combined ScanResult against numeric thresholds and tenant policy.
+//  5. On policy pass, issues a credential using the configured issuer client flow.
+//  6. Returns the issued document ID and credential offer URL.
+func (c *Client) SubmitIDScan(ctx context.Context, livenessSessionID string, idScanReq *facetec.IDScanRequest) (string, string, error) {
 	lv, err := c.sessions.TakeLiveness(livenessSessionID)
 	if err != nil {
-		return "", fmt.Errorf("id-scan: liveness session: %w", err)
+		return "", "", fmt.Errorf("id-scan: liveness session: %w", err)
 	}
 	// Zero the FaceMap bytes on return regardless of outcome (P1).
 	defer clear(lv.FaceMap)
@@ -143,10 +144,10 @@ func (c *Client) SubmitIDScan(ctx context.Context, livenessSessionID string, idS
 	idScanReq.FaceMap = "" // drop string reference immediately after the call
 
 	if err != nil {
-		return "", fmt.Errorf("id-scan: facetec server: %w", err)
+		return "", "", fmt.Errorf("id-scan: facetec server: %w", err)
 	}
 	if !idScanResult.Success {
-		return "", fmt.Errorf("id-scan: scan did not pass")
+		return "", "", fmt.Errorf("id-scan: scan did not pass")
 	}
 
 	scanResult := facetec.ScanResult{
@@ -159,7 +160,7 @@ func (c *Client) SubmitIDScan(ctx context.Context, livenessSessionID string, idS
 
 	tc, ok := tenant.FromStdContext(ctx)
 	if !ok {
-		return "", fmt.Errorf("id-scan: tenant context missing from request")
+		return "", "", fmt.Errorf("id-scan: tenant context missing from request")
 	}
 
 	if err := tc.Policy.EvaluateScan(scanResult); err != nil {
@@ -168,23 +169,23 @@ func (c *Client) SubmitIDScan(ctx context.Context, livenessSessionID string, idS
 			zap.String("doc_type", idScanResult.DocumentData.DocumentType),
 			zap.Int("face_match_level", idScanResult.FaceMatchLevel),
 		)
-		return "", fmt.Errorf("id-scan: %w", err)
+		return "", "", fmt.Errorf("id-scan: %w", err)
 	}
 
-	txID, err := c.issueCredential(ctx, scanResult, tc.Issuer)
+	docID, offerURL, err := c.issueCredential(ctx, scanResult, tc.Issuer)
 	if err != nil {
-		return "", fmt.Errorf("id-scan: issue credential: %w", err)
+		return "", "", fmt.Errorf("id-scan: issue credential: %w", err)
 	}
 
 	// P6: structured audit record — no biometric or PII fields.
 	c.log.Info("AUDIT credential_issued",
 		zap.String("tenant", tc.ID),
-		zap.String("transaction_id", txID),
+		zap.String("document_id", docID),
 		zap.String("doc_type", idScanResult.DocumentData.DocumentType),
 		zap.String("format", tc.Issuer.Format),
 		zap.String("scope", tc.Issuer.Scope),
 	)
-	return txID, nil
+	return docID, offerURL, nil
 }
 
 // ProcessRequest proxies FaceTec's requestBlob/responseBlob exchange and, when
@@ -228,7 +229,7 @@ func (c *Client) ProcessRequest(ctx context.Context, req *facetec.ProcessRequest
 		return resp, nil
 	}
 
-	txID, err := c.issueCredential(ctx, *scanResult, tc.Issuer)
+	docID, offerURL, err := c.issueCredential(ctx, *scanResult, tc.Issuer)
 	if err != nil {
 		c.log.Error("process-request credential issuance failed", zap.Error(err))
 		resp.CredentialIssueError = "credential issuance failed"
@@ -237,12 +238,13 @@ func (c *Client) ProcessRequest(ctx context.Context, req *facetec.ProcessRequest
 
 	c.log.Info("AUDIT credential_issued",
 		zap.String("tenant", tc.ID),
-		zap.String("transaction_id", txID),
+		zap.String("document_id", docID),
 		zap.String("doc_type", scanResult.IDScan.DocumentData.DocumentType),
 		zap.String("format", tc.Issuer.Format),
 		zap.String("scope", tc.Issuer.Scope),
 	)
-	resp.TransactionID = txID
+	resp.TransactionID = docID
+	resp.CredentialOfferURL = offerURL
 	return resp, nil
 }
 
@@ -272,11 +274,11 @@ func (c *Client) Ready() error {
 	return nil
 }
 
-// issueCredential sends the policy-approved DocumentData to the vc issuer and
-// stores the resulting signed credential in the session manager.
+// issueCredential sends the policy-approved DocumentData to the vc apigw REST
+// issuer (upload + notification) and returns the document ID and credential offer URL.
 // P2: raw MRZ lines are stripped before forwarding — they encode the full identity
 // in machine-readable form and must not leave this service.
-func (c *Client) issueCredential(ctx context.Context, result facetec.ScanResult, issuer tenant.IssuerParams) (string, error) {
+func (c *Client) issueCredential(ctx context.Context, result facetec.ScanResult, issuer tenant.IssuerParams) (documentID string, offerURL string, err error) {
 	// Strip raw MRZ lines — they duplicate all identity fields in a parseable format.
 	docData := result.IDScan.DocumentData
 	docData.MRZLine1 = ""
@@ -285,11 +287,11 @@ func (c *Client) issueCredential(ctx context.Context, result facetec.ScanResult,
 
 	data, err := json.Marshal(docData)
 	if err != nil {
-		return "", fmt.Errorf("marshal document data: %w", err)
+		return "", "", fmt.Errorf("marshal document data: %w", err)
 	}
 	var docDataMap map[string]any
 	if err := json.Unmarshal(data, &docDataMap); err != nil {
-		return "", fmt.Errorf("unmarshal document data: %w", err)
+		return "", "", fmt.Errorf("unmarshal document data: %w", err)
 	}
 
 	authenticSource := c.cfg.Issuer.AuthenticSource
@@ -301,7 +303,11 @@ func (c *Client) issueCredential(ctx context.Context, result facetec.ScanResult,
 		vct = issuer.Scope
 	}
 
-	documentID := fmt.Sprintf("ft-%d", time.Now().UnixNano())
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "", "", fmt.Errorf("generate document ID: %w", err)
+	}
+	documentID = "ft-" + hex.EncodeToString(b)
 
 	uploadReq := &issuerclient.UploadRequest{
 		Meta: &issuerclient.MetaData{
@@ -317,7 +323,7 @@ func (c *Client) issueCredential(ctx context.Context, result facetec.ScanResult,
 	}
 
 	if err := c.issuer.Upload(ctx, uploadReq); err != nil {
-		return "", fmt.Errorf("upload: %w", err)
+		return "", "", fmt.Errorf("upload: %w", err)
 	}
 
 	notifReq := &issuerclient.NotificationRequest{
@@ -328,16 +334,14 @@ func (c *Client) issueCredential(ctx context.Context, result facetec.ScanResult,
 
 	notifReply, err := c.issuer.Notification(ctx, notifReq)
 	if err != nil {
-		return "", fmt.Errorf("notification: %w", err)
+		return "", "", fmt.Errorf("notification: %w", err)
 	}
 
-	if notifReply.Data == nil || notifReply.Data.DeepLink == "" {
-		return "", fmt.Errorf("notification: no credential offer returned")
+	if notifReply.Data == nil || notifReply.Data.CredentialOfferURL == "" {
+		return "", "", fmt.Errorf("notification: no credential offer returned")
 	}
 
-	// Store the deep link as the credential offer URI. The wallet will use
-	// the apigw's OID4VCI flow directly via this URI.
-	return c.sessions.PutOffer([]string{notifReply.Data.DeepLink}, issuer.Scope)
+	return documentID, notifReply.Data.CredentialOfferURL, nil
 }
 
 // buildFaceTecHTTPClient constructs an *http.Client with the TLS configuration

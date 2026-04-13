@@ -21,6 +21,7 @@ type ProcessRequestRequest struct {
 type ProcessRequestResponse struct {
 	Payload              map[string]any
 	TransactionID        string
+	CredentialOfferURL   string
 	CredentialIssueError string
 }
 
