@@ -51,14 +51,14 @@ type MetaData struct {
 	RealData        bool   `json:"real_data"`
 }
 
-// NotificationRequest is the body for POST /notification.
+// NotificationRequest is the body for POST /api/v1/notification.
 type NotificationRequest struct {
 	AuthenticSource string `json:"authentic_source"`
 	VCT             string `json:"vct"`
 	DocumentID      string `json:"document_id"`
 }
 
-// NotificationReply holds the credential offer data returned by /notification.
+// NotificationReply holds the credential offer data returned by /api/v1/notification.
 type NotificationReply struct {
 	Data *QRData `json:"data"`
 }
@@ -145,7 +145,7 @@ func (c *Client) post(ctx context.Context, u string, body any, result any) (*htt
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return resp, fmt.Errorf("HTTP %d: %s", resp.StatusCode, truncate(respBody, 200))
+		return resp, fmt.Errorf("HTTP POST %s returned %d: %s", req.URL.Path, resp.StatusCode, truncate(respBody, 200))
 	}
 
 	if result != nil && len(respBody) > 0 {

@@ -10,8 +10,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -246,6 +248,27 @@ func TestReadyz(t *testing.T) {
 	ts := newTestServer(t, &stubApiv1{}, "")
 	resp := getJSON(t, ts, "/readyz", "")
 	assertStatus(t, resp, http.StatusOK)
+}
+
+func TestHealthz(t *testing.T) {
+	ts := newTestServer(t, &stubApiv1{}, "")
+	resp := getJSON(t, ts, "/healthz", "")
+	assertStatus(t, resp, http.StatusOK)
+}
+
+func TestMetrics_ReturnsPrometheusFormat(t *testing.T) {
+	ts := newTestServer(t, &stubApiv1{}, "")
+	resp := getJSON(t, ts, "/metrics", "")
+	assertStatus(t, resp, http.StatusOK)
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	// Prometheus text format must contain at least one HELP or TYPE line.
+	if !strings.Contains(string(body), "# HELP") && !strings.Contains(string(body), "# TYPE") {
+		t.Error("expected Prometheus text format with HELP/TYPE lines")
+	}
 }
 
 // ----------------------------------------------------------------------------

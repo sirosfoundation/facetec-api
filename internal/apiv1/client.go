@@ -17,13 +17,14 @@ package apiv1
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
-	"time"
 
 	"go.uber.org/zap"
 
@@ -127,9 +128,9 @@ func (c *Client) SubmitLiveness(ctx context.Context, req *facetec.LivenessCheckR
 //  1. Retrieves and consumes the in-memory FaceMap ([]byte) for livenessSessionID.
 //  2. Forwards the combined request to the FaceTec Server (FaceMap converted to string for JSON).
 //  3. Immediately zeros the FaceMap bytes via defer.
-//  4. Evaluates the combined ScanResult against numeric thresholds + SPOCP policy.
-//  5. On policy pass, issues a credential via the vc gRPC issuer.
-//  6. Returns an opaque transaction ID redeemable via RedeemOffer.
+//  4. Evaluates the combined ScanResult against numeric thresholds and tenant policy.
+//  5. On policy pass, issues a credential using the configured issuer client flow.
+//  6. Returns the issued document ID and credential offer URL.
 func (c *Client) SubmitIDScan(ctx context.Context, livenessSessionID string, idScanReq *facetec.IDScanRequest) (string, string, error) {
 	lv, err := c.sessions.TakeLiveness(livenessSessionID)
 	if err != nil {
@@ -273,8 +274,8 @@ func (c *Client) Ready() error {
 	return nil
 }
 
-// issueCredential sends the policy-approved DocumentData to the vc issuer and
-// stores the resulting signed credential in the session manager.
+// issueCredential sends the policy-approved DocumentData to the vc apigw REST
+// issuer (upload + notification) and returns the document ID and credential offer URL.
 // P2: raw MRZ lines are stripped before forwarding — they encode the full identity
 // in machine-readable form and must not leave this service.
 func (c *Client) issueCredential(ctx context.Context, result facetec.ScanResult, issuer tenant.IssuerParams) (documentID string, offerURL string, err error) {
@@ -302,7 +303,11 @@ func (c *Client) issueCredential(ctx context.Context, result facetec.ScanResult,
 		vct = issuer.Scope
 	}
 
-	documentID = fmt.Sprintf("ft-%d", time.Now().UnixNano())
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "", "", fmt.Errorf("generate document ID: %w", err)
+	}
+	documentID = "ft-" + hex.EncodeToString(b)
 
 	uploadReq := &issuerclient.UploadRequest{
 		Meta: &issuerclient.MetaData{

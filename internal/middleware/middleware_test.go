@@ -375,3 +375,43 @@ func TestMaxConcurrent_RejectsWhenFull(t *testing.T) {
 
 	close(block) // let first request complete
 }
+
+// ── Prometheus ────────────────────────────────────────────────────────────────
+
+func TestPrometheus_RecordsMetrics(t *testing.T) {
+	r := gin.New()
+	r.Use(middleware.Prometheus("/skip"))
+	r.GET("/test", func(c *gin.Context) { c.Status(http.StatusOK) })
+	r.GET("/skip", func(c *gin.Context) { c.Status(http.StatusOK) })
+
+	// Request to /test should be recorded.
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Code)
+	}
+
+	// Request to /skip should not be recorded but still served.
+	w2 := httptest.NewRecorder()
+	req2 := httptest.NewRequest(http.MethodGet, "/skip", nil)
+	r.ServeHTTP(w2, req2)
+	if w2.Code != http.StatusOK {
+		t.Errorf("skip path: expected 200, got %d", w2.Code)
+	}
+}
+
+func TestPrometheus_UnmatchedPath(t *testing.T) {
+	r := gin.New()
+	r.Use(middleware.Prometheus())
+	r.GET("/test", func(c *gin.Context) { c.Status(http.StatusOK) })
+
+	// Request to a non-existent path — should label as "unmatched".
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/nonexistent", nil)
+	r.ServeHTTP(w, req)
+	// Gin returns 404 for unmatched routes when NoRoute is not set.
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected 404 for unmatched, got %d", w.Code)
+	}
+}
