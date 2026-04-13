@@ -331,13 +331,13 @@ func (c *Client) issueCredential(ctx context.Context, result facetec.ScanResult,
 		return "", fmt.Errorf("notification: %w", err)
 	}
 
-	if notifReply.Data == nil || notifReply.Data.DeepLink == "" {
+	if notifReply.Data == nil || notifReply.Data.CredentialOfferURL == "" {
 		return "", fmt.Errorf("notification: no credential offer returned")
 	}
 
-	// Store the deep link as the credential offer URI. The wallet will use
-	// the apigw's OID4VCI flow directly via this URI.
-	return c.sessions.PutOffer([]string{notifReply.Data.DeepLink}, issuer.Scope)
+	// Store the credential offer URL. The wallet will use the apigw's
+	// OID4VCI flow directly via this URI.
+	return c.sessions.PutOffer([]string{notifReply.Data.CredentialOfferURL}, issuer.Scope)
 }
 
 // buildFaceTecHTTPClient constructs an *http.Client with the TLS configuration
