@@ -66,6 +66,10 @@ type DocumentData struct {
 	MRZLine1       string `json:"mrzLine1"`
 	MRZLine2       string `json:"mrzLine2"`
 	MRZLine3       string `json:"mrzLine3"`
+	// Portrait is the base64-encoded face photo cropped from the ID document.
+	// It is sourced exclusively from the FaceTec Server response and is never
+	// taken from client input.
+	Portrait string `json:"portrait,omitempty"`
 }
 
 // ScanResult combines an in-memory liveness result with a photo ID scan result.

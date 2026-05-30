@@ -82,6 +82,15 @@ func ExtractScanResult(payload map[string]any) (*ScanResult, bool, error) {
 	nfcAuthStatus, _, _ := lookupInt(results["nfcAuthenticationStatusEnumInt"])
 	barcodeStatus, _, _ := lookupInt(results["barcodeStatusEnumInt"])
 
+	// Extract portrait from idScanResultsSoFar; fall back to top-level payload.
+	// FaceTec Server v10 returns the face crop extracted from the ID document
+	// as "photoIDFaceCrop" — a base64-encoded image alongside documentData.
+	portrait, _ := lookupString(results["photoIDFaceCrop"])
+	if portrait == "" {
+		portrait, _ = lookupString(payload["photoIDFaceCrop"])
+	}
+	documentData.Portrait = portrait
+
 	return &ScanResult{
 		Liveness: LivenessCheckResult{
 			Success:       true,
@@ -315,6 +324,13 @@ func lookupBool(value any) (bool, bool, error) {
 	default:
 		return false, false, fmt.Errorf("unsupported type %T", value)
 	}
+}
+
+// lookupString returns (value, true) when value is a non-empty string, and
+// ("", false) for nil or any other type.
+func lookupString(value any) (string, bool) {
+	s, ok := value.(string)
+	return s, ok && s != ""
 }
 
 func lookupInt(value any) (int, bool, error) {
