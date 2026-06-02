@@ -64,9 +64,11 @@ func mapSexToISO5218(s string) int {
 	case "F", "FEMALE":
 		return 2
 	case "X":
-		return 9
+		return 0
 	default:
 		return 0
+	}
+}
 	}
 }
 
