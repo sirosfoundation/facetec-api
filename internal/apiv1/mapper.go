@@ -14,9 +14,9 @@ import (
 type CredentialClaims struct {
 	GivenName      string `json:"given_name"`
 	FamilyName     string `json:"family_name"`
-	BirthDate      string `json:"birth_date"`        // DD-MM-YYYY
-	Nationality    string `json:"nationality"`        // ISO 3166-1 alpha-2
-	ExpiryDate     string `json:"expiry_date"`        // DD-MM-YYYY
+	BirthDate      string `json:"birth_date"`  // DD-MM-YYYY
+	Nationality    string `json:"nationality"` // ISO 3166-1 alpha-2
+	ExpiryDate     string `json:"expiry_date"` // DD-MM-YYYY
 	DocumentNumber string `json:"document_number"`
 	IssuingCountry string `json:"issuing_country"`    // ISO 3166-1 alpha-2
 	Sex            int    `json:"sex"`                // ISO 5218: 0=unknown, 1=male, 2=female, 9=not applicable
