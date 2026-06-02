@@ -327,7 +327,7 @@ func lookupBool(value any) (bool, bool, error) {
 }
 
 // lookupString returns (value, true) when value is a non-empty string, and
-// ("", false) for nil or any other type.
+// ("", false) for nil, empty string, or any non-string type.
 func lookupString(value any) (string, bool) {
 	s, ok := value.(string)
 	return s, ok && s != ""

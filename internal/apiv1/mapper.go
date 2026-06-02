@@ -57,22 +57,21 @@ func reformatDateToDDMMYYYY(s string) string {
 
 // mapSexToISO5218 maps a sex string to an ISO/IEC 5218 integer code:
 // 0 = not known, 1 = male, 2 = female, 9 = not applicable.
+// MRZ/document "X" means unspecified/other, which maps to 0 (not known)
+// rather than 9 (not applicable).
 func mapSexToISO5218(s string) int {
 	switch strings.ToUpper(strings.TrimSpace(s)) {
 	case "M", "MALE":
 		return 1
 	case "F", "FEMALE":
 		return 2
-	case "X":
-		return 0
 	default:
 		return 0
 	}
 }
-	}
-}
 
-// toISO3166Alpha2 converts an ISO 3166-1 alpha-3 country code to alpha-2.
+// toISO3166Alpha2 converts an ISO 3166-1 alpha-3 country code or a human-readable
+// country name (as returned by FaceTec templateInfo.documentCountry) to alpha-2.
 // Already-2-letter codes are returned as-is (uppercased). Unknown codes are
 // returned unchanged.
 func toISO3166Alpha2(code string) string {
@@ -83,7 +82,41 @@ func toISO3166Alpha2(code string) string {
 	if a2, ok := iso3166Alpha3ToAlpha2[code]; ok {
 		return a2
 	}
+	if a2, ok := countryNameToAlpha2[code]; ok {
+		return a2
+	}
 	return code
+}
+
+// countryNameToAlpha2 maps uppercased English country names (as used by FaceTec
+// templateInfo.documentCountry) to ISO 3166-1 alpha-2 codes.
+var countryNameToAlpha2 = map[string]string{
+	// Europe
+	"AUSTRIA": "AT", "BELGIUM": "BE", "BULGARIA": "BG", "CROATIA": "HR",
+	"CYPRUS": "CY", "CZECHIA": "CZ", "CZECH REPUBLIC": "CZ", "DENMARK": "DK",
+	"ESTONIA": "EE", "FINLAND": "FI", "FRANCE": "FR", "GERMANY": "DE",
+	"GREECE": "GR", "HUNGARY": "HU", "ICELAND": "IS", "IRELAND": "IE",
+	"ITALY": "IT", "LATVIA": "LV", "LIECHTENSTEIN": "LI", "LITHUANIA": "LT",
+	"LUXEMBOURG": "LU", "MALTA": "MT", "NETHERLANDS": "NL", "NORWAY": "NO",
+	"POLAND": "PL", "PORTUGAL": "PT", "ROMANIA": "RO", "SLOVAKIA": "SK",
+	"SLOVENIA": "SI", "SPAIN": "ES", "SWEDEN": "SE", "SWITZERLAND": "CH",
+	"UKRAINE": "UA", "UNITED KINGDOM": "GB",
+	// Americas
+	"ARGENTINA": "AR", "BRAZIL": "BR", "CANADA": "CA", "CHILE": "CL",
+	"COLOMBIA": "CO", "MEXICO": "MX", "UNITED STATES": "US",
+	// Africa
+	"EGYPT": "EG", "MOROCCO": "MA", "NIGERIA": "NG", "SOUTH AFRICA": "ZA",
+	// Asia-Pacific
+	"AUSTRALIA": "AU", "CHINA": "CN", "INDIA": "IN", "INDONESIA": "ID",
+	"JAPAN": "JP", "MALAYSIA": "MY", "NEW ZEALAND": "NZ", "PAKISTAN": "PK",
+	"PHILIPPINES": "PH", "SINGAPORE": "SG", "SOUTH KOREA": "KR", "THAILAND": "TH",
+	"VIETNAM": "VN",
+	// Middle East
+	"IRAN": "IR", "IRAQ": "IQ", "ISRAEL": "IL", "JORDAN": "JO", "KUWAIT": "KW",
+	"LEBANON": "LB", "OMAN": "OM", "QATAR": "QA", "SAUDI ARABIA": "SA",
+	"TURKEY": "TR", "UNITED ARAB EMIRATES": "AE",
+	// CIS
+	"BELARUS": "BY", "KAZAKHSTAN": "KZ", "RUSSIA": "RU",
 }
 
 // iso3166Alpha3ToAlpha2 maps ISO 3166-1 alpha-3 codes to alpha-2 for countries

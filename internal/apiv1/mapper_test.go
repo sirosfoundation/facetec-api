@@ -112,7 +112,7 @@ func TestMapSexToISO5218(t *testing.T) {
 		{"f", 2},
 		{"FEMALE", 2},
 		{"female", 2},
-		{"X", 9},
+		{"X", 0}, // MRZ "X" = unspecified/other → ISO 5218 code 0 (not known)
 		{"", 0},
 		{"U", 0},
 		{"unknown", 0},
@@ -154,6 +154,13 @@ func TestToISO3166Alpha2(t *testing.T) {
 		{"AUS", "AU"},
 		{"JPN", "JP"},
 		{"SAU", "SA"},
+		// Human-readable country names (FaceTec templateInfo.documentCountry).
+		{"Sweden", "SE"},
+		{"Netherlands", "NL"},
+		{"Germany", "DE"},
+		{"United Kingdom", "GB"},
+		{"United States", "US"},
+		{"Czech Republic", "CZ"},
 	}
 	for _, tt := range tests {
 		got := toISO3166Alpha2(tt.input)
