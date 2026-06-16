@@ -72,14 +72,22 @@ type Config struct {
 
 // Queue manages pending operator reviews.
 type Queue struct {
-	mu      sync.Mutex
-	entries map[string]*Entry
-	ttl     time.Duration
-	done    chan struct{}
+	mu        sync.Mutex
+	entries   map[string]*Entry
+	ttl       time.Duration
+	done      chan struct{}
+	closeOnce sync.Once
 }
 
+// defaultTTL is used when a zero/negative TTL is provided.
+const defaultTTL = 30 * time.Minute
+
 // NewQueue creates a review queue with the given TTL.
+// If ttl <= 0, defaults to 30 minutes.
 func NewQueue(ttl time.Duration) *Queue {
+	if ttl <= 0 {
+		ttl = defaultTTL
+	}
 	q := &Queue{
 		entries: make(map[string]*Entry),
 		ttl:     ttl,
@@ -173,9 +181,9 @@ func (q *Queue) Decide(sessionID string, decision Decision, operatorID, justific
 	return e, nil
 }
 
-// Close stops the background reaper.
+// Close stops the background reaper. It is safe to call multiple times.
 func (q *Queue) Close() {
-	close(q.done)
+	q.closeOnce.Do(func() { close(q.done) })
 }
 
 func (q *Queue) reap() {

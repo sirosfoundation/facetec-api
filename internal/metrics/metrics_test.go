@@ -9,18 +9,8 @@ import (
 )
 
 func TestObserveSession(t *testing.T) {
-	// Reset default registry for test isolation
 	reg := prometheus.NewRegistry()
-	origRegisterer := prometheus.DefaultRegisterer
-	origGatherer := prometheus.DefaultGatherer
-	prometheus.DefaultRegisterer = reg
-	prometheus.DefaultGatherer = reg
-	defer func() {
-		prometheus.DefaultRegisterer = origRegisterer
-		prometheus.DefaultGatherer = origGatherer
-	}()
-
-	m := New()
+	m := NewWith(reg)
 	m.ObserveSession("accept", "default", "passport", 0.92, 8, 5*time.Second)
 
 	// Verify counter incremented
@@ -39,16 +29,7 @@ func TestObserveSession(t *testing.T) {
 
 func TestObservePolicyEval(t *testing.T) {
 	reg := prometheus.NewRegistry()
-	origRegisterer := prometheus.DefaultRegisterer
-	origGatherer := prometheus.DefaultGatherer
-	prometheus.DefaultRegisterer = reg
-	prometheus.DefaultGatherer = reg
-	defer func() {
-		prometheus.DefaultRegisterer = origRegisterer
-		prometheus.DefaultGatherer = origGatherer
-	}()
-
-	m := New()
+	m := NewWith(reg)
 	m.ObservePolicyEval(50 * time.Millisecond)
 	// No panic = pass
 }

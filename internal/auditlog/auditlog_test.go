@@ -15,7 +15,6 @@ func TestFileLogger(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = logger.Close() }()
 
 	rec := Record{
 		SessionID:      "test-session-001",

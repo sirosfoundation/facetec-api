@@ -17,7 +17,8 @@ import (
 type Binding struct {
 	// Nonce is a 32-byte random value generated at session start.
 	Nonce []byte
-	// NonceHex is the hex-encoded nonce for inclusion in credential claims.
+	// NonceHex is the hex-encoded nonce for storage/transport (e.g. audit records).
+	// For credential claims, use ComputeHash(outcome) which binds the nonce to the decision.
 	NonceHex string
 }
 

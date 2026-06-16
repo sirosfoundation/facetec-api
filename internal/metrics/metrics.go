@@ -22,44 +22,51 @@ type IPV struct {
 	QualityRejectionsTotal *prometheus.CounterVec
 }
 
-// New registers and returns the IPV metrics.
+// New registers and returns the IPV metrics using the default registerer.
 func New() *IPV {
+	return NewWith(prometheus.DefaultRegisterer)
+}
+
+// NewWith registers and returns the IPV metrics using the given registerer.
+// Use this in tests to avoid mutating global state.
+func NewWith(reg prometheus.Registerer) *IPV {
+	factory := promauto.With(reg)
 	return &IPV{
-		SessionsTotal: promauto.NewCounterVec(prometheus.CounterOpts{
+		SessionsTotal: factory.NewCounterVec(prometheus.CounterOpts{
 			Name: "facetec_ipv_sessions_total",
 			Help: "Total IPV sessions by outcome, tenant, and document type.",
 		}, []string{"outcome", "tenant", "doc_type"}),
 
-		LivenessScore: promauto.NewHistogram(prometheus.HistogramOpts{
+		LivenessScore: factory.NewHistogram(prometheus.HistogramOpts{
 			Name:    "facetec_liveness_score",
 			Help:    "Distribution of liveness scores (0.0–1.0).",
 			Buckets: []float64{0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 1.0},
 		}),
 
-		FaceMatchLevel: promauto.NewHistogram(prometheus.HistogramOpts{
+		FaceMatchLevel: factory.NewHistogram(prometheus.HistogramOpts{
 			Name:    "facetec_face_match_level",
 			Help:    "Distribution of face match levels (0–10).",
 			Buckets: []float64{1, 2, 3, 4, 5, 6, 7, 8, 9, 10},
 		}),
 
-		DocumentTypeTotal: promauto.NewCounterVec(prometheus.CounterOpts{
+		DocumentTypeTotal: factory.NewCounterVec(prometheus.CounterOpts{
 			Name: "facetec_document_type_total",
 			Help: "Total documents processed by type.",
 		}, []string{"type"}),
 
-		PolicyEvalDuration: promauto.NewHistogram(prometheus.HistogramOpts{
+		PolicyEvalDuration: factory.NewHistogram(prometheus.HistogramOpts{
 			Name:    "facetec_policy_evaluation_duration_seconds",
 			Help:    "Time spent evaluating SPOCP policy rules.",
 			Buckets: prometheus.DefBuckets,
 		}),
 
-		SessionDuration: promauto.NewHistogramVec(prometheus.HistogramOpts{
+		SessionDuration: factory.NewHistogramVec(prometheus.HistogramOpts{
 			Name:    "facetec_session_duration_seconds",
 			Help:    "End-to-end IPV session duration by outcome.",
 			Buckets: []float64{1, 2, 5, 10, 15, 30, 60, 120},
 		}, []string{"outcome"}),
 
-		QualityRejectionsTotal: promauto.NewCounterVec(prometheus.CounterOpts{
+		QualityRejectionsTotal: factory.NewCounterVec(prometheus.CounterOpts{
 			Name: "facetec_quality_rejections_total",
 			Help: "Total sessions rejected due to capture quality.",
 		}, []string{"reason"}),
