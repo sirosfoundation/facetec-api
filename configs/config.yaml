@@ -131,3 +131,16 @@ logging:
 #       format: mdoc
 #     policy:
 #       rules_dir: "/etc/facetec-api/rules/gov"
+
+# ── Audit log (ETSI 119 461 §4.5 traceability) ──────────────────────────────
+# audit:
+#   sink: "file"                          # "file", "webhook", or "" (disabled)
+#   path: "/var/log/facetec-api/audit.jsonl"
+#   webhook_url: ""
+#   retention_days: 365
+
+# ── Operator review / escalation (ETSI 119 461 §4.5) ─────────────────────────
+# review:
+#   enabled: false
+#   ttl: "24h"
+#   webhook_url: ""
