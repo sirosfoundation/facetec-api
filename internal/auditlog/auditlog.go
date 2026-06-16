@@ -140,9 +140,14 @@ type webhookLogger struct {
 
 func newWebhookLogger(url string, log *zap.Logger) *webhookLogger {
 	return &webhookLogger{
-		url:    url,
-		client: &http.Client{Timeout: 5 * time.Second},
-		log:    log,
+		url: url,
+		client: &http.Client{
+			Timeout: 5 * time.Second,
+			CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		},
+		log: log,
 	}
 }
 
@@ -163,8 +168,8 @@ func (l *webhookLogger) Write(ctx context.Context, rec Record) error {
 	}
 	_, _ = io.Copy(io.Discard, resp.Body)
 	_ = resp.Body.Close()
-	if resp.StatusCode >= 400 {
-		l.log.Warn("auditlog: webhook returned error", zap.Int("status", resp.StatusCode))
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		l.log.Warn("auditlog: webhook returned non-2xx", zap.Int("status", resp.StatusCode))
 		return fmt.Errorf("auditlog: webhook returned HTTP %d", resp.StatusCode)
 	}
 	return nil

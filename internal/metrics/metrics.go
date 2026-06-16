@@ -46,7 +46,7 @@ func NewWith(reg prometheus.Registerer) *IPV {
 		FaceMatchLevel: factory.NewHistogram(prometheus.HistogramOpts{
 			Name:    "facetec_face_match_level",
 			Help:    "Distribution of face match levels (0–10).",
-			Buckets: []float64{1, 2, 3, 4, 5, 6, 7, 8, 9, 10},
+			Buckets: []float64{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10},
 		}),
 
 		DocumentTypeTotal: factory.NewCounterVec(prometheus.CounterOpts{

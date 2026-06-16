@@ -51,8 +51,14 @@ func TestComputeHash_DifferentOutcomes(t *testing.T) {
 }
 
 func TestNewBinding_Uniqueness(t *testing.T) {
-	b1, _ := NewBinding()
-	b2, _ := NewBinding()
+	b1, err := NewBinding()
+	if err != nil {
+		t.Fatal("NewBinding() error:", err)
+	}
+	b2, err := NewBinding()
+	if err != nil {
+		t.Fatal("NewBinding() error:", err)
+	}
 	if b1.NonceHex == b2.NonceHex {
 		t.Error("two bindings should have different nonces")
 	}
