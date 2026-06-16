@@ -11,11 +11,13 @@ import (
 func TestObserveSession(t *testing.T) {
 	// Reset default registry for test isolation
 	reg := prometheus.NewRegistry()
+	origRegisterer := prometheus.DefaultRegisterer
+	origGatherer := prometheus.DefaultGatherer
 	prometheus.DefaultRegisterer = reg
 	prometheus.DefaultGatherer = reg
 	defer func() {
-		prometheus.DefaultRegisterer = prometheus.NewRegistry()
-		prometheus.DefaultGatherer = prometheus.NewRegistry()
+		prometheus.DefaultRegisterer = origRegisterer
+		prometheus.DefaultGatherer = origGatherer
 	}()
 
 	m := New()
@@ -37,11 +39,13 @@ func TestObserveSession(t *testing.T) {
 
 func TestObservePolicyEval(t *testing.T) {
 	reg := prometheus.NewRegistry()
+	origRegisterer := prometheus.DefaultRegisterer
+	origGatherer := prometheus.DefaultGatherer
 	prometheus.DefaultRegisterer = reg
 	prometheus.DefaultGatherer = reg
 	defer func() {
-		prometheus.DefaultRegisterer = prometheus.NewRegistry()
-		prometheus.DefaultGatherer = prometheus.NewRegistry()
+		prometheus.DefaultRegisterer = origRegisterer
+		prometheus.DefaultGatherer = origGatherer
 	}()
 
 	m := New()

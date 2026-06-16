@@ -20,7 +20,8 @@
 (facetec-scan (liveness-score (* range numeric ge 080)) (face-match-level (* range numeric ge 06)) (doc-type id_card))
 
 ; --- Operator review rules (ETSI 119 461 §4.5 escalation) ---
-; Escalate borderline passports: liveness 60-79 OR face-match 4-5
+; Escalate borderline passports: liveness >= 60 AND face-match >= 4
+; (entries that also satisfy the accept rules above will match accept first)
 (facetec-scan-review (liveness-score (* range numeric ge 060)) (face-match-level (* range numeric ge 04)) (doc-type passport) (mrz-verified true))
 ; Escalate borderline driving licences
 (facetec-scan-review (liveness-score (* range numeric ge 060)) (face-match-level (* range numeric ge 04)) (doc-type dl) (barcode-verified true))

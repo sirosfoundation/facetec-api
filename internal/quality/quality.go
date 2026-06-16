@@ -7,7 +7,6 @@ package quality
 
 import (
 	"fmt"
-	"strings"
 )
 
 // Assessment holds the quality indicators extracted from a FaceTec response.
@@ -81,20 +80,19 @@ func ExtractFromPayload(payload map[string]any) Assessment {
 // SPOCPAtom returns the quality level as a SPOCP atom for policy evaluation.
 // Returns "high", "medium", or "low" based on the assessment.
 func SPOCPAtom(a Assessment) string {
-	var issues []string
+	issues := 0
 	if a.AuditTrailCount < 2 {
-		issues = append(issues, "low_audit_trail")
+		issues++
 	}
 	if a.IDScanImageCount < 2 {
-		issues = append(issues, "low_id_images")
+		issues++
 	}
-	switch len(issues) {
+	switch issues {
 	case 0:
 		return "high"
 	case 1:
 		return "medium"
 	default:
-		_ = strings.Join(issues, ",")
 		return "low"
 	}
 }

@@ -90,7 +90,11 @@ func NewQueue(ttl time.Duration) *Queue {
 }
 
 // Submit adds a scan result to the review queue.
+// The FaceMap biometric template is cleared before storage to prevent
+// accidental retention of biometric data in the review queue.
 func (q *Queue) Submit(sessionID, tenantID string, result facetec.ScanResult) {
+	// Sanitize: never retain biometric templates in the review queue.
+	result.Liveness.FaceMap = ""
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	now := time.Now()
@@ -147,6 +151,9 @@ func (q *Queue) GetEvidence(sessionID string) (*Evidence, error) {
 // Decide records an operator decision on a pending review.
 // Returns the entry for further processing (audit, credential issuance).
 func (q *Queue) Decide(sessionID string, decision Decision, operatorID, justification string) (*Entry, error) {
+	if decision != DecisionAccept && decision != DecisionReject {
+		return nil, fmt.Errorf("review: invalid decision %q, must be %q or %q", decision, DecisionAccept, DecisionReject)
+	}
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	e, ok := q.entries[sessionID]
@@ -184,10 +191,11 @@ func (q *Queue) reap() {
 			for id, e := range q.entries {
 				if e.Decision == "" && now.After(e.ExpiresAt) {
 					e.Decision = DecisionReject
+					e.DecidedAt = now
 					e.Justification = "auto-expired"
 				}
 				// Remove decided entries older than 1 hour
-				if e.Decision != "" && now.Sub(e.DecidedAt) > time.Hour {
+				if e.Decision != "" && !e.DecidedAt.IsZero() && now.Sub(e.DecidedAt) > time.Hour {
 					delete(q.entries, id)
 				}
 			}

@@ -8,6 +8,7 @@
 package auditlog
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -73,6 +74,9 @@ type Config struct {
 // New creates an audit Logger based on config.
 // Returns a no-op logger if sink is empty.
 func New(cfg Config, log *zap.Logger) (Logger, error) {
+	if log == nil {
+		log = zap.NewNop()
+	}
 	switch strings.ToLower(cfg.Sink) {
 	case "file":
 		if cfg.Path == "" {
@@ -147,7 +151,7 @@ func (l *webhookLogger) Write(ctx context.Context, rec Record) error {
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, l.url, strings.NewReader(string(body)))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, l.url, bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
@@ -161,6 +165,7 @@ func (l *webhookLogger) Write(ctx context.Context, rec Record) error {
 	_ = resp.Body.Close()
 	if resp.StatusCode >= 400 {
 		l.log.Warn("auditlog: webhook returned error", zap.Int("status", resp.StatusCode))
+		return fmt.Errorf("auditlog: webhook returned HTTP %d", resp.StatusCode)
 	}
 	return nil
 }
