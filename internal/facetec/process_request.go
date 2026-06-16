@@ -19,10 +19,11 @@ type ProcessRequestRequest struct {
 // ProcessRequestResponse wraps the upstream FaceTec payload and any
 // credential-issuance metadata produced by facetec-api.
 type ProcessRequestResponse struct {
-	Payload              map[string]any
-	TransactionID        string
-	CredentialOfferURL   string
-	CredentialIssueError string
+	Payload                map[string]any
+	TransactionID          string
+	CredentialOfferURL     string
+	CredentialIssueError   string
+	CredentialIssueErrCode string
 }
 
 // ExtractScanResult translates a successful FaceTec Server v10 process-request
