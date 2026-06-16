@@ -84,6 +84,21 @@ Numeric acceptance thresholds are encoded in the SPOCP rule files themselves rat
 separate config keys. This keeps deployment policy in one place and allows per-tenant rule sets
 to express score requirements such as liveness and face-match minima.
 
+### ETSI 119 461 §4.5 Compliance
+
+The following settings support the regulatory traceability and operator-oversight requirements
+of ETSI TS 119 461 §4.5 (Identity Proofing and Verification — Remote Video).
+
+| YAML key | Env variable | Default | Description |
+|----------|-------------|---------|-------------|
+| `audit.sink` | `AUDIT_SINK` | *(empty — disabled)* | Audit log output: `file`, `webhook`, or empty to disable |
+| `audit.path` | `AUDIT_PATH` | *(empty)* | File path for `file` sink (append-only JSONL) |
+| `audit.webhook_url` | `AUDIT_WEBHOOK_URL` | *(empty)* | Endpoint for `webhook` sink (POST, JSON, non-2xx = failure) |
+| `audit.retention_days` | `AUDIT_RETENTION_DAYS` | `365` | Informational; used by external log rotation |
+| `review.enabled` | `REVIEW_ENABLED` | `false` | Enable operator escalation for borderline results |
+| `review.ttl` | `REVIEW_TTL` | `24h` | How long a review entry awaits operator decision before expiry |
+| `review.webhook_url` | `REVIEW_WEBHOOK_URL` | *(empty)* | Endpoint notified when a new review is queued |
+
 ### Authentication
 
 Three modes are selected automatically based on which keys are present:
@@ -248,6 +263,63 @@ Query fields available in every SPOCP query:
 | `mrz-verified` | `true`, `false` |
 | `nfc-verified` | `true`, `false` |
 | `barcode-verified` | `true`, `false` |
+
+## ETSI 119 461 §4.5 Compliance
+
+This release implements the traceability and quality controls required by
+[ETSI TS 119 461](https://www.etsi.org/deliver/etsi_ts/119400_119499/119461/)
+§4.5 for remote identity proofing and verification (IPV).
+
+### Components
+
+| Package | Purpose |
+|---------|---------|
+| `internal/auditlog` | Persistent IPV session audit logging (file or webhook sink) |
+| `internal/metrics` | Prometheus metrics: liveness scores, face-match levels, document types, outcomes |
+| `internal/evidence` | Cryptographic evidence binding — HMAC-SHA256 commitment linking session outcome to nonce |
+| `internal/review` | Operator review queue with TTL, escalation webhook, and PII-safe evidence retrieval |
+| `internal/quality` | Image quality assessment (face alignment, lighting, resolution) with configurable thresholds |
+
+### Audit Log
+
+Every IPV session (accept, reject, or escalate) is written to a persistent audit trail.
+Each record contains: session ID, timestamp, tenant, outcome, liveness score, face-match level,
+document type, and evidence hash. No biometric templates or PII are written to the log.
+
+Sinks:
+- **file** — Append-only JSONL at `audit.path`. Suitable for SIEM ingestion.
+- **webhook** — POST JSON to `audit.webhook_url`. Non-2xx responses (including 3xx) are treated
+  as delivery failures. Redirects are not followed (security hardening).
+
+### Prometheus Metrics
+
+Exposed at `/metrics` (Prometheus text format):
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `facetec_liveness_score` | Histogram | Distribution of liveness confidence scores |
+| `facetec_face_match_level` | Histogram | Distribution of face match levels (0–10) |
+| `facetec_document_type_total` | Counter (by `type`) | Documents processed by type |
+| `facetec_ipv_outcome_total` | Counter (by `outcome`) | Accept / reject / escalate totals |
+
+### Evidence Binding
+
+On each decision, the service computes a SHA-256 HMAC over a unique random nonce and the
+outcome string. The resulting `evidence_hash` is written into the audit log, creating a
+verifiable commitment that ties the decision to a specific session without embedding PII.
+
+### Operator Review
+
+When enabled (`review.enabled: true`), borderline results are placed in a time-limited queue
+instead of immediate rejection. An operator can inspect PII-safe evidence summaries and render
+an accept/reject decision within the TTL window (default 24 h). Expired entries are reaped
+automatically. The queue never retains biometric templates or session tokens.
+
+### Quality Checks
+
+The `internal/quality` package evaluates face alignment, lighting uniformity, and image
+resolution before accepting a scan. Results are recorded in the audit log and exposed as
+metrics. Scans below configured thresholds are rejected or escalated.
 
 ## Security
 

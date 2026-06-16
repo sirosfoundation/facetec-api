@@ -18,3 +18,15 @@
 (facetec-scan (liveness-score (* range numeric ge 080)) (face-match-level (* range numeric ge 06)) (doc-type dl) (mrz-verified false) (nfc-verified false) (barcode-verified true))
 ; Accept national ID cards
 (facetec-scan (liveness-score (* range numeric ge 080)) (face-match-level (* range numeric ge 06)) (doc-type id_card))
+
+; --- Operator review rules (ETSI 119 461 §4.5 escalation) ---
+; NOTE: These rules use the "facetec-scan-review" head atom. The policy engine
+; must query both "facetec-scan" (for accept/reject) and "facetec-scan-review"
+; (for escalation) to enable the operator review path.
+; Escalate borderline passports: liveness >= 60 AND face-match >= 4
+; (entries that also satisfy the accept rules above will match accept first)
+(facetec-scan-review (liveness-score (* range numeric ge 060)) (face-match-level (* range numeric ge 04)) (doc-type passport) (mrz-verified true))
+; Escalate borderline driving licences
+(facetec-scan-review (liveness-score (* range numeric ge 060)) (face-match-level (* range numeric ge 04)) (doc-type dl) (barcode-verified true))
+; Escalate borderline ID cards
+(facetec-scan-review (liveness-score (* range numeric ge 060)) (face-match-level (* range numeric ge 04)) (doc-type id_card))

@@ -21,6 +21,10 @@ type Config struct {
 	Session  SessionConfig  `yaml:"session"`
 	Security SecurityConfig `yaml:"security"`
 	Logging  LoggingConfig  `yaml:"logging"`
+	// Audit configures persistent IPV session audit logging (ETSI 119 461 §4.5).
+	Audit AuditConfig `yaml:"audit"`
+	// Review configures operator escalation for borderline results.
+	Review ReviewConfig `yaml:"review"`
 	// JWT holds the shared JWT validation settings for all tenant authentication.
 	// All tenants use the same secret and issuer; the tenant_id claim selects the tenant.
 	JWT JWTConfig `yaml:"jwt"`
@@ -186,6 +190,28 @@ type JWTConfig struct {
 type LoggingConfig struct {
 	Level      string `yaml:"level"      envconfig:"LOG_LEVEL"`
 	Production bool   `yaml:"production" envconfig:"LOG_PRODUCTION"`
+}
+
+// AuditConfig controls persistent IPV session audit logging.
+type AuditConfig struct {
+	// Sink selects the output: "file", "webhook", or "" (disabled).
+	Sink string `yaml:"sink" envconfig:"AUDIT_SINK"`
+	// Path is the file path for the "file" sink (append-only JSONL).
+	Path string `yaml:"path" envconfig:"AUDIT_PATH"`
+	// WebhookURL is the endpoint for the "webhook" sink.
+	WebhookURL string `yaml:"webhook_url" envconfig:"AUDIT_WEBHOOK_URL"`
+	// RetentionDays is informational for external log rotation.
+	RetentionDays int `yaml:"retention_days" envconfig:"AUDIT_RETENTION_DAYS"`
+}
+
+// ReviewConfig controls operator escalation for borderline IPV results.
+type ReviewConfig struct {
+	// Enabled activates the operator review path. Default false.
+	Enabled bool `yaml:"enabled" envconfig:"REVIEW_ENABLED"`
+	// TTL is how long a review entry awaits operator decision before auto-rejection.
+	TTL time.Duration `yaml:"ttl" envconfig:"REVIEW_TTL"`
+	// WebhookURL is an optional endpoint notified when a new review is queued.
+	WebhookURL string `yaml:"webhook_url" envconfig:"REVIEW_WEBHOOK_URL"`
 }
 
 // Load reads configuration from an optional YAML file and then applies environment overrides.
