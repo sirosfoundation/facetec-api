@@ -30,6 +30,7 @@ import (
 
 	"github.com/sirosfoundation/facetec-api/internal/config"
 	"github.com/sirosfoundation/facetec-api/internal/facetec"
+	"github.com/sirosfoundation/facetec-api/internal/idverrors"
 	"github.com/sirosfoundation/facetec-api/internal/issuerclient"
 	"github.com/sirosfoundation/facetec-api/internal/session"
 	"github.com/sirosfoundation/facetec-api/internal/tenant"
@@ -103,7 +104,7 @@ func (c *Client) SubmitLiveness(ctx context.Context, req *facetec.LivenessCheckR
 		return "", fmt.Errorf("liveness: facetec server: %w", err)
 	}
 	if !result.Success {
-		return "", fmt.Errorf("liveness: check did not pass")
+		return "", idverrors.New(idverrors.CodeLivenessFailed, "liveness check did not pass")
 	}
 
 	// Convert to []byte immediately so the backing array can be explicitly zeroed later.
@@ -134,7 +135,7 @@ func (c *Client) SubmitLiveness(ctx context.Context, req *facetec.LivenessCheckR
 func (c *Client) SubmitIDScan(ctx context.Context, livenessSessionID string, idScanReq *facetec.IDScanRequest) (string, string, error) {
 	lv, err := c.sessions.TakeLiveness(livenessSessionID)
 	if err != nil {
-		return "", "", fmt.Errorf("id-scan: liveness session: %w", err)
+		return "", "", idverrors.Newf(idverrors.CodeSessionExpired, "liveness session expired or not found: %v", err)
 	}
 	// Zero the FaceMap bytes on return regardless of outcome (P1).
 	defer clear(lv.FaceMap)
@@ -147,7 +148,7 @@ func (c *Client) SubmitIDScan(ctx context.Context, livenessSessionID string, idS
 		return "", "", fmt.Errorf("id-scan: facetec server: %w", err)
 	}
 	if !idScanResult.Success {
-		return "", "", fmt.Errorf("id-scan: scan did not pass")
+		return "", "", idverrors.New(idverrors.CodeMatchFailed, "document scan or face-match did not pass")
 	}
 
 	scanResult := facetec.ScanResult{
@@ -169,12 +170,12 @@ func (c *Client) SubmitIDScan(ctx context.Context, livenessSessionID string, idS
 			zap.String("doc_type", idScanResult.DocumentData.DocumentType),
 			zap.Int("face_match_level", idScanResult.FaceMatchLevel),
 		)
-		return "", "", fmt.Errorf("id-scan: %w", err)
+		return "", "", idverrors.Newf(idverrors.CodePolicyRejected, "scan rejected by policy: %v", err)
 	}
 
 	docID, offerURL, err := c.issueCredential(ctx, scanResult, tc.Issuer)
 	if err != nil {
-		return "", "", fmt.Errorf("id-scan: issue credential: %w", err)
+		return "", "", idverrors.Newf(idverrors.CodeIssuanceFailed, "credential issuance failed: %v", err)
 	}
 
 	// P6: structured audit record — no biometric or PII fields.
@@ -205,6 +206,7 @@ func (c *Client) ProcessRequest(ctx context.Context, req *facetec.ProcessRequest
 			zap.Error(err),
 		)
 		resp.CredentialIssueError = "unable to evaluate scan result"
+		resp.CredentialIssueErrCode = string(idverrors.CodeMatchFailed)
 		return resp, nil
 	}
 	if !ok {
@@ -215,6 +217,7 @@ func (c *Client) ProcessRequest(ctx context.Context, req *facetec.ProcessRequest
 	if !ok {
 		c.log.Error("process-request tenant context missing")
 		resp.CredentialIssueError = "credential issuance unavailable"
+		resp.CredentialIssueErrCode = string(idverrors.CodeInternalError)
 		return resp, nil
 	}
 
@@ -226,6 +229,7 @@ func (c *Client) ProcessRequest(ctx context.Context, req *facetec.ProcessRequest
 			zap.Error(err),
 		)
 		resp.CredentialIssueError = "scan rejected by policy"
+		resp.CredentialIssueErrCode = string(idverrors.CodePolicyRejected)
 		return resp, nil
 	}
 
@@ -233,6 +237,7 @@ func (c *Client) ProcessRequest(ctx context.Context, req *facetec.ProcessRequest
 	if err != nil {
 		c.log.Error("process-request credential issuance failed", zap.Error(err))
 		resp.CredentialIssueError = "credential issuance failed"
+		resp.CredentialIssueErrCode = string(idverrors.CodeIssuanceFailed)
 		return resp, nil
 	}
 

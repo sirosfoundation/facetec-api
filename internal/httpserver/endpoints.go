@@ -68,6 +68,7 @@ func (s *Service) endpointProcessRequest(c *gin.Context) {
 	}
 	if resp.CredentialIssueError != "" {
 		resp.Payload["credentialIssueError"] = resp.CredentialIssueError
+		resp.Payload["credentialIssueErrorCode"] = resp.CredentialIssueErrCode
 	}
 
 	s.respond(c, http.StatusOK, resp.Payload)

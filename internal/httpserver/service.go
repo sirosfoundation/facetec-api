@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/sirosfoundation/facetec-api/internal/config"
+	"github.com/sirosfoundation/facetec-api/internal/idverrors"
 	"github.com/sirosfoundation/facetec-api/internal/middleware"
 	"github.com/sirosfoundation/facetec-api/internal/tenant"
 )
@@ -134,12 +135,18 @@ func (s *Service) respond(c *gin.Context, status int, body any) {
 }
 
 // fail logs err internally and writes a safe JSON error response.
-// The raw error detail is never sent to the caller to avoid leaking internals.
+// If err is an *idverrors.Error, the structured code is included in the response
+// for SDK consumers to map to typed exceptions.
 func (s *Service) fail(c *gin.Context, status int, err error, clientMsg string) {
 	if err != nil {
 		s.log.Error(clientMsg, zap.Error(err), zap.Int("status", status))
 	}
-	c.JSON(status, gin.H{"error": clientMsg})
+	var idvErr *idverrors.Error
+	if errors.As(err, &idvErr) {
+		c.JSON(status, gin.H{"error": idvErr.Message, "error_code": idvErr.Code})
+	} else {
+		c.JSON(status, gin.H{"error": clientMsg})
+	}
 	c.Abort()
 }
 
