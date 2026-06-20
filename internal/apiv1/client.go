@@ -281,22 +281,17 @@ func (c *Client) Ready() error {
 
 // issueCredential sends the policy-approved DocumentData to the vc apigw REST
 // issuer (upload + notification) and returns the document ID and credential offer URL.
-// P2: raw MRZ lines are stripped before forwarding — they encode the full identity
-// in machine-readable form and must not leave this service.
+// P2: only the credential-schema fields are forwarded via MapDocumentData — MRZ lines
+// and internal FaceTec metadata are excluded by the mapper and never leave this service.
 func (c *Client) issueCredential(ctx context.Context, result facetec.ScanResult, issuer tenant.IssuerParams) (documentID string, offerURL string, err error) {
-	// Strip raw MRZ lines — they duplicate all identity fields in a parseable format.
-	docData := result.IDScan.DocumentData
-	docData.MRZLine1 = ""
-	docData.MRZLine2 = ""
-	docData.MRZLine3 = ""
-
-	data, err := json.Marshal(docData)
+	claims := MapDocumentData(result.IDScan.DocumentData)
+	data, err := json.Marshal(claims)
 	if err != nil {
-		return "", "", fmt.Errorf("marshal document data: %w", err)
+		return "", "", fmt.Errorf("marshal credential claims: %w", err)
 	}
 	var docDataMap map[string]any
 	if err := json.Unmarshal(data, &docDataMap); err != nil {
-		return "", "", fmt.Errorf("unmarshal document data: %w", err)
+		return "", "", fmt.Errorf("unmarshal credential claims: %w", err)
 	}
 
 	authenticSource := c.cfg.Issuer.AuthenticSource

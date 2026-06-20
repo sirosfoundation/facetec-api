@@ -285,6 +285,56 @@ func TestNormalizeFaceTecDate(t *testing.T) {
 	}
 }
 
+func TestExtractScanResult_PortraitFromIDScanResults(t *testing.T) {
+	p := realPayload()
+	results := p["idScanResultsSoFar"].(map[string]any)
+	results["photoIDFaceCrop"] = "base64portrait"
+	result, ok, err := ExtractScanResult(p)
+	if err != nil || !ok {
+		t.Fatalf("err=%v ok=%v", err, ok)
+	}
+	if result.IDScan.DocumentData.Portrait != "base64portrait" {
+		t.Errorf("Portrait: got %q, want base64portrait", result.IDScan.DocumentData.Portrait)
+	}
+}
+
+func TestExtractScanResult_PortraitFallsBackToTopLevel(t *testing.T) {
+	p := realPayload()
+	// Not present in idScanResultsSoFar — only at the top level.
+	p["photoIDFaceCrop"] = "toplevelportrait"
+	result, ok, err := ExtractScanResult(p)
+	if err != nil || !ok {
+		t.Fatalf("err=%v ok=%v", err, ok)
+	}
+	if result.IDScan.DocumentData.Portrait != "toplevelportrait" {
+		t.Errorf("Portrait: got %q, want toplevelportrait", result.IDScan.DocumentData.Portrait)
+	}
+}
+
+func TestExtractScanResult_PortraitIDScanResultsTakesPrecedence(t *testing.T) {
+	p := realPayload()
+	results := p["idScanResultsSoFar"].(map[string]any)
+	results["photoIDFaceCrop"] = "primary"
+	p["photoIDFaceCrop"] = "fallback"
+	result, ok, err := ExtractScanResult(p)
+	if err != nil || !ok {
+		t.Fatalf("err=%v ok=%v", err, ok)
+	}
+	if result.IDScan.DocumentData.Portrait != "primary" {
+		t.Errorf("Portrait: got %q, want primary", result.IDScan.DocumentData.Portrait)
+	}
+}
+
+func TestExtractScanResult_PortraitAbsent(t *testing.T) {
+	result, ok, err := ExtractScanResult(realPayload())
+	if err != nil || !ok {
+		t.Fatalf("err=%v ok=%v", err, ok)
+	}
+	if result.IDScan.DocumentData.Portrait != "" {
+		t.Errorf("Portrait: got %q, want empty", result.IDScan.DocumentData.Portrait)
+	}
+}
+
 func TestExtractScanResult_NoMatchLevel(t *testing.T) {
 	p := realPayload()
 	results := p["idScanResultsSoFar"].(map[string]any)
