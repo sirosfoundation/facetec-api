@@ -280,7 +280,7 @@ func (c *Client) Ready() error {
 }
 
 // issueCredential sends the policy-approved DocumentData to the vc apigw REST
-// issuer (upload + notification) and returns the document ID and credential offer URL.
+// issuer (upload + preauth_offer) and returns the document ID and credential offer URL.
 // P2: only the credential-schema fields are forwarded via MapDocumentData — MRZ lines
 // and internal FaceTec metadata are excluded by the mapper and never leave this service.
 func (c *Client) issueCredential(ctx context.Context, result facetec.ScanResult, issuer tenant.IssuerParams) (documentID string, offerURL string, err error) {
@@ -326,22 +326,22 @@ func (c *Client) issueCredential(ctx context.Context, result facetec.ScanResult,
 		return "", "", fmt.Errorf("upload: %w", err)
 	}
 
-	notifReq := &issuerclient.NotificationRequest{
+	preauthReq := &issuerclient.PreauthOfferRequest{
 		AuthenticSource: authenticSource,
-		VCT:             vct,
+		Scope:           issuer.Scope,
 		DocumentID:      documentID,
 	}
 
-	notifReply, err := c.issuer.Notification(ctx, notifReq)
+	preauthReply, err := c.issuer.PreauthOffer(ctx, preauthReq)
 	if err != nil {
-		return "", "", fmt.Errorf("notification: %w", err)
+		return "", "", fmt.Errorf("preauth_offer: %w", err)
 	}
 
-	if notifReply.Data == nil || notifReply.Data.CredentialOfferURL == "" {
-		return "", "", fmt.Errorf("notification: no credential offer returned")
+	if preauthReply.CredentialOfferURL == "" {
+		return "", "", fmt.Errorf("preauth_offer: no credential offer returned")
 	}
 
-	return documentID, notifReply.Data.CredentialOfferURL, nil
+	return documentID, preauthReply.CredentialOfferURL, nil
 }
 
 // buildFaceTecHTTPClient constructs an *http.Client with the TLS configuration
