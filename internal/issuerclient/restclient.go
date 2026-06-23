@@ -51,22 +51,17 @@ type MetaData struct {
 	RealData        bool   `json:"real_data"`
 }
 
-// NotificationRequest is the body for POST /api/v1/notification.
-type NotificationRequest struct {
+// PreauthOfferRequest is the body for POST /api/v1/datastore/preauth_offer.
+// Introduced in VC 0.6.5-sirosid.3; replaces the removed /api/v1/notification endpoint.
+type PreauthOfferRequest struct {
 	AuthenticSource string `json:"authentic_source"`
-	VCT             string `json:"vct"`
+	Scope           string `json:"scope"`
 	DocumentID      string `json:"document_id"`
 }
 
-// NotificationReply holds the credential offer data returned by /api/v1/notification.
-type NotificationReply struct {
-	Data *QRData `json:"data"`
-}
-
-// QRData holds the QR code and credential offer URL from a notification response.
-type QRData struct {
+// PreauthOfferReply holds the credential offer data returned by /api/v1/datastore/preauth_offer.
+type PreauthOfferReply struct {
 	CredentialOfferURL string `json:"credential_offer_url"`
-	QRBase64           string `json:"qr_base64"`
 }
 
 // Client is an HTTP client for the vc apigw.
@@ -102,10 +97,11 @@ func (c *Client) Upload(ctx context.Context, req *UploadRequest) error {
 	return err
 }
 
-// Notification requests a credential offer for a previously uploaded document.
-func (c *Client) Notification(ctx context.Context, req *NotificationRequest) (*NotificationReply, error) {
-	fullURL := c.baseURL + "/api/v1/notification"
-	reply := &NotificationReply{}
+// PreauthOffer requests a pre-authorized credential offer for a previously uploaded document.
+// It calls POST /api/v1/datastore/preauth_offer, introduced in VC 0.6.5-sirosid.3.
+func (c *Client) PreauthOffer(ctx context.Context, req *PreauthOfferRequest) (*PreauthOfferReply, error) {
+	fullURL := c.baseURL + "/api/v1/datastore/preauth_offer"
+	reply := &PreauthOfferReply{}
 	_, err := c.post(ctx, fullURL, req, reply)
 	if err != nil {
 		return nil, err
