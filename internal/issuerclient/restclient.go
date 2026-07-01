@@ -90,6 +90,12 @@ func New(cfg Config) (*Client, error) {
 
 // Upload sends document data to the apigw for credential issuance.
 func (c *Client) Upload(ctx context.Context, req *UploadRequest) error {
+	if req.Meta == nil {
+		return fmt.Errorf("issuerclient: meta is required")
+	}
+	if len(req.IdentityMappingIDs) == 0 {
+		return fmt.Errorf("issuerclient: at least one identity_mapping_id is required")
+	}
 	fullURL := c.baseURL + "/api/v1/datastore"
 	_, err := c.post(ctx, fullURL, req, nil)
 	return err
