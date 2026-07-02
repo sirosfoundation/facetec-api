@@ -43,7 +43,7 @@ const faceTecDocumentDataJSON = `{
 // FaceTec grouped-fields format.
 func realPayload() map[string]any {
 	return map[string]any{
-		"success": true,
+		"success": false,
 		"idScanResultsSoFar": map[string]any{
 			"matchLevel":                        float64(7),
 			"mrzStatusEnumInt":                  float64(2),
@@ -51,7 +51,7 @@ func realPayload() map[string]any {
 			"barcodeStatusEnumInt":              float64(0),
 			"faceOnDocumentStatusEnumInt":       float64(1),
 			"fullIDStatusEnumInt":               float64(0),
-			"photoIDNextStepEnumInt":            float64(5),
+			"photoIDNextStepEnumInt":            float64(4),
 			"nfcStatusEnumInt":                  float64(6),
 			"watermarkAndHologramStatusEnumInt": float64(0),
 			"documentData":                      faceTecDocumentDataJSON,
@@ -119,50 +119,66 @@ func TestExtractScanResult_RealPayload(t *testing.T) {
 func TestExtractScanResult_NFC_Passed(t *testing.T) {
 	p := realPayload()
 	results := p["idScanResultsSoFar"].(map[string]any)
-	results["nfcAuthenticationStatusEnumInt"] = float64(1)
+	results["nfcAuthenticationStatusEnumInt"] = float64(4)
 	result, ok, err := ExtractScanResult(p)
 	if err != nil || !ok {
 		t.Fatalf("err=%v ok=%v", err, ok)
 	}
 	if !result.IDScan.NFCVerified {
-		t.Error("NFCVerified: want true (nfcAuthenticationStatusEnumInt=1)")
+		t.Error("NFCVerified: want true (nfcAuthenticationStatusEnumInt=4)")
 	}
 }
 
 func TestExtractScanResult_Barcode_Passed(t *testing.T) {
 	p := realPayload()
 	results := p["idScanResultsSoFar"].(map[string]any)
-	results["barcodeStatusEnumInt"] = float64(2)
+	results["barcodeStatusEnumInt"] = float64(3)
 	result, ok, err := ExtractScanResult(p)
 	if err != nil || !ok {
 		t.Fatalf("err=%v ok=%v", err, ok)
 	}
 	if !result.IDScan.BarcodeVerified {
-		t.Error("BarcodeVerified: want true (barcodeStatusEnumInt=2)")
+		t.Error("BarcodeVerified: want true (barcodeStatusEnumInt=3)")
 	}
 }
 
-func TestExtractScanResult_NotSuccess(t *testing.T) {
+func TestExtractScanResult_NotCompleted(t *testing.T) {
+	p := realPayload()
+	results := p["idScanResultsSoFar"].(map[string]any)
+	results["photoIDNextStepEnumInt"] = float64(5) // not completed
+	_, ok, err := ExtractScanResult(p)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ok {
+		t.Error("expected ok=false when photoIDNextStepEnumInt != 4")
+	}
+}
+
+func TestExtractScanResult_NoNextStep(t *testing.T) {
+	p := realPayload()
+	results := p["idScanResultsSoFar"].(map[string]any)
+	delete(results, "photoIDNextStepEnumInt")
+	_, ok, err := ExtractScanResult(p)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ok {
+		t.Error("expected ok=false when photoIDNextStepEnumInt missing")
+	}
+}
+
+func TestExtractScanResult_TopLevelSuccessFalseStillWorks(t *testing.T) {
+	// Real FaceTec payloads have success: false even for successful scans.
+	// Verify we do NOT gate on the top-level success field.
 	p := realPayload()
 	p["success"] = false
 	_, ok, err := ExtractScanResult(p)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if ok {
-		t.Error("expected ok=false when success=false")
-	}
-}
-
-func TestExtractScanResult_NoSuccess(t *testing.T) {
-	p := realPayload()
-	delete(p, "success")
-	_, ok, err := ExtractScanResult(p)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if ok {
-		t.Error("expected ok=false when success key missing")
+	if !ok {
+		t.Error("expected ok=true: top-level success should be ignored")
 	}
 }
 

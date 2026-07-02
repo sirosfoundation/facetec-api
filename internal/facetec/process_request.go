@@ -32,22 +32,16 @@ type ProcessRequestResponse struct {
 // successful photo-ID match.
 //
 // The FaceTec Server v10 response has:
-//   - success (bool) at the top level
+//   - idScanResultsSoFar.photoIDNextStepEnumInt (int) — 4 = completed
 //   - idScanResultsSoFar.matchLevel (int) for face match confidence
 //   - idScanResultsSoFar.mrzStatusEnumInt (int) — 2 = passed
-//   - idScanResultsSoFar.nfcAuthenticationStatusEnumInt (int) — 1 = passed
-//   - idScanResultsSoFar.barcodeStatusEnumInt (int) — 2 = passed
-//   - documentData (object or JSON string) at the top level
+//   - idScanResultsSoFar.nfcAuthenticationStatusEnumInt (int) — 4 = passed
+//   - idScanResultsSoFar.barcodeStatusEnumInt (int) — 3 = passed
+//   - documentData (object or JSON string) inside idScanResultsSoFar
+//
+// Note: the top-level "success" field is false for successful scans;
+// the authoritative completion indicator is photoIDNextStepEnumInt == 4.
 func ExtractScanResult(payload map[string]any) (*ScanResult, bool, error) {
-	// Top-level success flag.
-	success, ok, err := lookupBool(payload["success"])
-	if err != nil {
-		return nil, false, fmt.Errorf("facetec: process-request success: %w", err)
-	}
-	if !ok || !success {
-		return nil, false, nil
-	}
-
 	// idScanResultsSoFar contains match and verification details.
 	resultsValue, ok := payload["idScanResultsSoFar"]
 	if !ok || resultsValue == nil {
@@ -56,6 +50,17 @@ func ExtractScanResult(payload map[string]any) (*ScanResult, bool, error) {
 	results, ok := resultsValue.(map[string]any)
 	if !ok {
 		return nil, false, fmt.Errorf("facetec: idScanResultsSoFar is %T, want object", resultsValue)
+	}
+
+	// photoIDNextStepEnumInt == 4 means the photo-ID scan completed successfully.
+	// The top-level "success" field is NOT a reliable indicator — real FaceTec
+	// payloads report success: false even for fully successful scans.
+	nextStep, ok, err := lookupInt(results["photoIDNextStepEnumInt"])
+	if err != nil {
+		return nil, false, fmt.Errorf("facetec: photoIDNextStepEnumInt: %w", err)
+	}
+	if !ok || nextStep != 4 {
+		return nil, false, nil
 	}
 
 	matchLevel, ok, err := lookupInt(results["matchLevel"])
@@ -77,8 +82,8 @@ func ExtractScanResult(payload map[string]any) (*ScanResult, bool, error) {
 
 	// FaceTec v10 verification status enums:
 	//   mrzStatusEnumInt:               2 = passed
-	//   nfcAuthenticationStatusEnumInt:  1 = passed
-	//   barcodeStatusEnumInt:            2 = passed
+	//   nfcAuthenticationStatusEnumInt:  4 = passed
+	//   barcodeStatusEnumInt:            3 = passed
 	mrzStatus, _, _ := lookupInt(results["mrzStatusEnumInt"])
 	nfcAuthStatus, _, _ := lookupInt(results["nfcAuthenticationStatusEnumInt"])
 	barcodeStatus, _, _ := lookupInt(results["barcodeStatusEnumInt"])
@@ -102,8 +107,8 @@ func ExtractScanResult(payload map[string]any) (*ScanResult, bool, error) {
 			FaceMatchLevel:  matchLevel,
 			DocumentData:    documentData,
 			MRZVerified:     mrzStatus == 2,
-			NFCVerified:     nfcAuthStatus == 1,
-			BarcodeVerified: barcodeStatus == 2,
+			NFCVerified:     nfcAuthStatus == 4,
+			BarcodeVerified: barcodeStatus == 3,
 		},
 	}, true, nil
 }
