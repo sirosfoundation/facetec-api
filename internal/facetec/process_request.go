@@ -315,23 +315,6 @@ func remarshalInto(src any, dst any) error {
 	return json.Unmarshal(buf, dst)
 }
 
-func lookupBool(value any) (bool, bool, error) {
-	switch typed := value.(type) {
-	case nil:
-		return false, false, nil
-	case bool:
-		return typed, true, nil
-	case string:
-		parsed, err := strconv.ParseBool(typed)
-		if err != nil {
-			return false, false, fmt.Errorf("parse bool %q: %w", typed, err)
-		}
-		return parsed, true, nil
-	default:
-		return false, false, fmt.Errorf("unsupported type %T", value)
-	}
-}
-
 // lookupString returns (value, true) when value is a non-empty string, and
 // ("", false) for nil, empty string, or any non-string type.
 func lookupString(value any) (string, bool) {
