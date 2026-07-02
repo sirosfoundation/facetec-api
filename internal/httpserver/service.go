@@ -127,6 +127,15 @@ func (s *Service) registerRoutes(r *gin.Engine, registry *tenant.Registry) {
 		// Offer redemption — authenticated, no rate limit (wallet pull).
 		v1.GET("/offer/:txid", s.endpointOffer)
 	}
+
+	// Debug-only routes — never registered in production, regardless of
+	// whether TenantAuth would otherwise permit the request. Lets local dev
+	// exercise the vc apigw integration (upload + preauth_offer) in seconds,
+	// without a real device scan for every iteration.
+	if !s.cfg.Logging.Production {
+		debug := r.Group("/debug", auth)
+		debug.POST("/issue-dummy-credential", s.endpointIssueDummyCredential)
+	}
 }
 
 // respond writes a JSON response using the supplied HTTP status code.

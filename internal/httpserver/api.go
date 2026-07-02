@@ -19,4 +19,8 @@ type Apiv1 interface {
 	// Ready returns nil when the service is fully operational (policy rules loaded, etc.).
 	// Used by the /readyz probe.
 	Ready() error
+	// IssueDummyCredential is a temporary debug tool that runs the issuance
+	// pipeline against fixed placeholder identity data, bypassing FaceTec
+	// entirely. Only registered when not running in production mode.
+	IssueDummyCredential(ctx context.Context) (documentID string, offerURL string, err error)
 }
