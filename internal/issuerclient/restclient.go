@@ -34,21 +34,19 @@ type Config struct {
 	Timeout time.Duration
 }
 
-// UploadRequest is the body for POST /api/v1/upload.
+// UploadRequest is the body for POST /api/v1/datastore.
+// Must match vc's vcclient.UploadRequest.
 type UploadRequest struct {
-	Meta                *MetaData      `json:"meta"`
-	DocumentData        map[string]any `json:"document_data"`
-	DocumentDataVersion string         `json:"document_data_version"`
+	Meta               *MetaData      `json:"meta"`
+	IdentityMappingIDs []string       `json:"identity_mapping_ids"`
+	DocumentData       map[string]any `json:"document_data"`
 }
 
-// MetaData matches the vc apigw's metadata model.
+// MetaData matches the vc apigw's model.MetaData.
 type MetaData struct {
 	AuthenticSource string `json:"authentic_source"`
-	DocumentVersion string `json:"document_version"`
-	VCT             string `json:"vct"`
 	Scope           string `json:"scope"`
 	DocumentID      string `json:"document_id"`
-	RealData        bool   `json:"real_data"`
 }
 
 // PreauthOfferRequest is the body for POST /api/v1/datastore/preauth_offer.
@@ -92,7 +90,13 @@ func New(cfg Config) (*Client, error) {
 
 // Upload sends document data to the apigw for credential issuance.
 func (c *Client) Upload(ctx context.Context, req *UploadRequest) error {
-	fullURL := c.baseURL + "/api/v1/upload"
+	if req.Meta == nil {
+		return fmt.Errorf("issuerclient: meta is required")
+	}
+	if len(req.IdentityMappingIDs) == 0 {
+		return fmt.Errorf("issuerclient: at least one identity_mapping_id is required")
+	}
+	fullURL := c.baseURL + "/api/v1/datastore"
 	_, err := c.post(ctx, fullURL, req, nil)
 	return err
 }

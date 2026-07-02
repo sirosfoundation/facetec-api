@@ -298,10 +298,6 @@ func (c *Client) issueCredential(ctx context.Context, result facetec.ScanResult,
 	if authenticSource == "" {
 		authenticSource = "facetec-api"
 	}
-	vct := c.cfg.Issuer.VCT
-	if vct == "" {
-		vct = issuer.Scope
-	}
 
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
@@ -312,14 +308,11 @@ func (c *Client) issueCredential(ctx context.Context, result facetec.ScanResult,
 	uploadReq := &issuerclient.UploadRequest{
 		Meta: &issuerclient.MetaData{
 			AuthenticSource: authenticSource,
-			DocumentVersion: "1.0.0",
-			VCT:             vct,
 			Scope:           issuer.Scope,
 			DocumentID:      documentID,
-			RealData:        true,
 		},
-		DocumentData:        docDataMap,
-		DocumentDataVersion: "1.0.0",
+		IdentityMappingIDs: []string{documentID},
+		DocumentData:       docDataMap,
 	}
 
 	if err := c.issuer.Upload(ctx, uploadReq); err != nil {
