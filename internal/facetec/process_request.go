@@ -26,29 +26,37 @@ type ProcessRequestResponse struct {
 	CredentialIssueErrCode string
 }
 
+// photoIDNextStepComplete is the value of idScanResultsSoFar.photoIDNextStepEnumInt
+// meaning the FaceTec Server considers the Photo ID Match session complete —
+// no further SDK steps (front/back retry, NFC, user confirmation) are expected.
+// Other documented values: 0 = FRONT_RETRY, 1 = BACK, 2 = BACK_RETRY,
+// 3 = USER_CONFIRM, 5 = NFC.
+const photoIDNextStepComplete = 4
+
 // ExtractScanResult translates a successful FaceTec Server v10 process-request
 // response into the internal ScanResult shape used by policy evaluation and
-// issuance. It returns ok=false when the payload does not represent a
-// successful photo-ID match.
+// issuance. It returns ok=false when the payload does not yet represent a
+// complete photo-ID scan (e.g. an earlier step in the session).
 //
 // The FaceTec Server v10 response has:
-//   - success (bool) at the top level
+//   - idScanResultsSoFar.photoIDNextStepEnumInt (int) — 4 = COMPLETE; the
+//     top-level "success" field does NOT indicate whether the ID scan
+//     matched (per FaceTec's docs, "Your Team is responsible for processing
+//     the Response Properties and determining how to proceed based on Your
+//     Team's Business Requirements" — there is no single pass/fail boolean
+//     for a photo-ID match). A fully successful scan can and does report
+//     top-level "success": false while every idScanResultsSoFar property
+//     indicates a perfect match; gating on it here previously caused
+//     legitimate successful scans to be silently dropped.
 //   - idScanResultsSoFar.matchLevel (int) for face match confidence
-//   - idScanResultsSoFar.mrzStatusEnumInt (int) — 2 = passed
-//   - idScanResultsSoFar.nfcAuthenticationStatusEnumInt (int) — 1 = passed
-//   - idScanResultsSoFar.barcodeStatusEnumInt (int) — 2 = passed
-//   - documentData (object or JSON string) at the top level
+//   - idScanResultsSoFar.mrzStatusEnumInt (int) — 2 = SUCCESS
+//   - idScanResultsSoFar.nfcAuthenticationStatusEnumInt (int) — 4 = AUTHENTICATED
+//   - idScanResultsSoFar.barcodeStatusEnumInt (int) — 3 = SUCCESS
+//   - documentData (object or JSON string) inside idScanResultsSoFar
 func ExtractScanResult(payload map[string]any) (*ScanResult, bool, error) {
-	// Top-level success flag.
-	success, ok, err := lookupBool(payload["success"])
-	if err != nil {
-		return nil, false, fmt.Errorf("facetec: process-request success: %w", err)
-	}
-	if !ok || !success {
-		return nil, false, nil
-	}
-
-	// idScanResultsSoFar contains match and verification details.
+	// idScanResultsSoFar contains match and verification details. Its absence
+	// means this response belongs to an earlier step of the session (e.g. the
+	// liveness-only step) that doesn't carry a scan result yet.
 	resultsValue, ok := payload["idScanResultsSoFar"]
 	if !ok || resultsValue == nil {
 		return nil, false, nil
@@ -56,6 +64,18 @@ func ExtractScanResult(payload map[string]any) (*ScanResult, bool, error) {
 	results, ok := resultsValue.(map[string]any)
 	if !ok {
 		return nil, false, fmt.Errorf("facetec: idScanResultsSoFar is %T, want object", resultsValue)
+	}
+
+	// photoIDNextStepEnumInt is FaceTec's actual signal for "this result is
+	// final and ready to evaluate" — 4 = COMPLETE. Other values (FRONT_RETRY,
+	// BACK, BACK_RETRY, USER_CONFIRM, NFC) mean the SDK still has another step
+	// to perform, so there's nothing to evaluate yet.
+	nextStep, ok, err := lookupInt(results["photoIDNextStepEnumInt"])
+	if err != nil {
+		return nil, false, fmt.Errorf("facetec: photoIDNextStepEnumInt: %w", err)
+	}
+	if !ok || nextStep != photoIDNextStepComplete {
+		return nil, false, nil
 	}
 
 	matchLevel, ok, err := lookupInt(results["matchLevel"])
@@ -75,10 +95,11 @@ func ExtractScanResult(payload map[string]any) (*ScanResult, bool, error) {
 		return nil, false, nil
 	}
 
-	// FaceTec v10 verification status enums:
-	//   mrzStatusEnumInt:               2 = passed
-	//   nfcAuthenticationStatusEnumInt:  1 = passed
-	//   barcodeStatusEnumInt:            2 = passed
+	// FaceTec v10 verification status enums (per FaceTec's Photo ID Match
+	// response-properties reference):
+	//   mrzStatusEnumInt:               2 = SUCCESS
+	//   nfcAuthenticationStatusEnumInt: 4 = AUTHENTICATED
+	//   barcodeStatusEnumInt:           3 = SUCCESS
 	mrzStatus, _, _ := lookupInt(results["mrzStatusEnumInt"])
 	nfcAuthStatus, _, _ := lookupInt(results["nfcAuthenticationStatusEnumInt"])
 	barcodeStatus, _, _ := lookupInt(results["barcodeStatusEnumInt"])
@@ -102,8 +123,8 @@ func ExtractScanResult(payload map[string]any) (*ScanResult, bool, error) {
 			FaceMatchLevel:  matchLevel,
 			DocumentData:    documentData,
 			MRZVerified:     mrzStatus == 2,
-			NFCVerified:     nfcAuthStatus == 1,
-			BarcodeVerified: barcodeStatus == 2,
+			NFCVerified:     nfcAuthStatus == 4,
+			BarcodeVerified: barcodeStatus == 3,
 		},
 	}, true, nil
 }
@@ -308,23 +329,6 @@ func remarshalInto(src any, dst any) error {
 		return err
 	}
 	return json.Unmarshal(buf, dst)
-}
-
-func lookupBool(value any) (bool, bool, error) {
-	switch typed := value.(type) {
-	case nil:
-		return false, false, nil
-	case bool:
-		return typed, true, nil
-	case string:
-		parsed, err := strconv.ParseBool(typed)
-		if err != nil {
-			return false, false, fmt.Errorf("parse bool %q: %w", typed, err)
-		}
-		return parsed, true, nil
-	default:
-		return false, false, fmt.Errorf("unsupported type %T", value)
-	}
 }
 
 // lookupString returns (value, true) when value is a non-empty string, and

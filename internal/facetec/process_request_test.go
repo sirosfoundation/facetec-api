@@ -37,13 +37,18 @@ const faceTecDocumentDataJSON = `{
   }
 }`
 
-// realPayload returns a payload shaped like a real FaceTec Server v10
-// /process-request response (successful photo-ID match).
-// documentData is a JSON string inside idScanResultsSoFar, matching the
-// FaceTec grouped-fields format.
+// realPayload returns a payload shaped like a real, successful FaceTec Server
+// v10 /process-request response captured from a live device scan.
+//
+// Notably, top-level "success" is false here — matching the real captured
+// payload — because FaceTec does not use it to signal a completed photo-ID
+// match. The only reliable completion signal is
+// idScanResultsSoFar.photoIDNextStepEnumInt == 4 (COMPLETE). NFC and barcode
+// default to "not verified" (0) here; individual tests flip them to their
+// passing values (4 and 3 respectively).
 func realPayload() map[string]any {
 	return map[string]any{
-		"success": true,
+		"success": false,
 		"idScanResultsSoFar": map[string]any{
 			"matchLevel":                        float64(7),
 			"mrzStatusEnumInt":                  float64(2),
@@ -51,7 +56,7 @@ func realPayload() map[string]any {
 			"barcodeStatusEnumInt":              float64(0),
 			"faceOnDocumentStatusEnumInt":       float64(1),
 			"fullIDStatusEnumInt":               float64(0),
-			"photoIDNextStepEnumInt":            float64(5),
+			"photoIDNextStepEnumInt":            float64(4),
 			"nfcStatusEnumInt":                  float64(6),
 			"watermarkAndHologramStatusEnumInt": float64(0),
 			"documentData":                      faceTecDocumentDataJSON,
@@ -69,7 +74,7 @@ func TestExtractScanResult_RealPayload(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !ok {
-		t.Fatal("expected ok=true for a successful scan")
+		t.Fatal("expected ok=true for a complete scan (photoIDNextStepEnumInt=4), regardless of top-level success")
 	}
 	if result.IDScan.FaceMatchLevel != 7 {
 		t.Errorf("FaceMatchLevel: got %d, want 7", result.IDScan.FaceMatchLevel)
@@ -119,50 +124,86 @@ func TestExtractScanResult_RealPayload(t *testing.T) {
 func TestExtractScanResult_NFC_Passed(t *testing.T) {
 	p := realPayload()
 	results := p["idScanResultsSoFar"].(map[string]any)
-	results["nfcAuthenticationStatusEnumInt"] = float64(1)
+	results["nfcAuthenticationStatusEnumInt"] = float64(4)
 	result, ok, err := ExtractScanResult(p)
 	if err != nil || !ok {
 		t.Fatalf("err=%v ok=%v", err, ok)
 	}
 	if !result.IDScan.NFCVerified {
-		t.Error("NFCVerified: want true (nfcAuthenticationStatusEnumInt=1)")
+		t.Error("NFCVerified: want true (nfcAuthenticationStatusEnumInt=4, AUTHENTICATED)")
 	}
 }
 
 func TestExtractScanResult_Barcode_Passed(t *testing.T) {
 	p := realPayload()
 	results := p["idScanResultsSoFar"].(map[string]any)
-	results["barcodeStatusEnumInt"] = float64(2)
+	results["barcodeStatusEnumInt"] = float64(3)
 	result, ok, err := ExtractScanResult(p)
 	if err != nil || !ok {
 		t.Fatalf("err=%v ok=%v", err, ok)
 	}
 	if !result.IDScan.BarcodeVerified {
-		t.Error("BarcodeVerified: want true (barcodeStatusEnumInt=2)")
+		t.Error("BarcodeVerified: want true (barcodeStatusEnumInt=3, SUCCESS)")
 	}
 }
 
-func TestExtractScanResult_NotSuccess(t *testing.T) {
+// TestExtractScanResult_TopLevelSuccessDoesNotGate proves that a fully
+// complete, successful scan is still recognized even when the top-level
+// "success" field is true — i.e. that field is simply ignored either way,
+// only photoIDNextStepEnumInt matters.
+func TestExtractScanResult_TopLevelSuccessDoesNotGate(t *testing.T) {
 	p := realPayload()
-	p["success"] = false
+	p["success"] = true
 	_, ok, err := ExtractScanResult(p)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if ok {
-		t.Error("expected ok=false when success=false")
+	if !ok {
+		t.Error("expected ok=true regardless of top-level success value")
 	}
 }
 
-func TestExtractScanResult_NoSuccess(t *testing.T) {
+// TestExtractScanResult_NoTopLevelSuccessKey proves the absence of a
+// top-level "success" key entirely doesn't affect the result — it's not
+// consulted at all.
+func TestExtractScanResult_NoTopLevelSuccessKey(t *testing.T) {
 	p := realPayload()
 	delete(p, "success")
 	_, ok, err := ExtractScanResult(p)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	if !ok {
+		t.Error("expected ok=true when success key is missing entirely")
+	}
+}
+
+// TestExtractScanResult_NotCompleteYet verifies that any photoIDNextStepEnumInt
+// value other than COMPLETE (4) — e.g. 3 = USER_CONFIRM — is treated as "not
+// ready to evaluate yet", not as a failure.
+func TestExtractScanResult_NotCompleteYet(t *testing.T) {
+	p := realPayload()
+	results := p["idScanResultsSoFar"].(map[string]any)
+	results["photoIDNextStepEnumInt"] = float64(3) // USER_CONFIRM
+	_, ok, err := ExtractScanResult(p)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if ok {
-		t.Error("expected ok=false when success key missing")
+		t.Error("expected ok=false when photoIDNextStepEnumInt != COMPLETE")
+	}
+}
+
+func TestExtractScanResult_NoNextStepField(t *testing.T) {
+	p := realPayload()
+	results := p["idScanResultsSoFar"].(map[string]any)
+	delete(results, "photoIDNextStepEnumInt")
+	_, ok, err := ExtractScanResult(p)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ok {
+		t.Error("expected ok=false when photoIDNextStepEnumInt is missing")
 	}
 }
 

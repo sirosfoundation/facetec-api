@@ -50,6 +50,10 @@ type stubApiv1 struct {
 
 	redeemEntry *session.OfferEntry
 	redeemErr   error
+
+	dummyCredDocID    string
+	dummyCredOfferURL string
+	dummyCredErr      error
 }
 
 func (s *stubApiv1) GetSessionToken(_ context.Context) (*facetec.SessionTokenResponse, error) {
@@ -134,6 +138,23 @@ func (s *stubApiv1) Ready() error {
 	return nil
 }
 
+func (s *stubApiv1) IssueDummyCredential(_ context.Context) (string, string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.dummyCredErr != nil {
+		return "", "", s.dummyCredErr
+	}
+	docID := s.dummyCredDocID
+	if docID == "" {
+		docID = "dummy-doc-id"
+	}
+	offerURL := s.dummyCredOfferURL
+	if offerURL == "" {
+		offerURL = "openid-credential-offer://?credential_offer_uri=https://issuer.example.com/credential-offer/dummy-uuid"
+	}
+	return docID, offerURL, nil
+}
+
 // ----------------------------------------------------------------------------
 // Test helpers
 // ----------------------------------------------------------------------------
@@ -166,6 +187,23 @@ func newTestServer(t *testing.T, stub *stubApiv1, appKey string) *httptest.Serve
 	t.Helper()
 	log := zap.NewNop()
 	cfg := testConfig(appKey, false)
+	reg, err := tenant.NewRegistry(cfg, log)
+	if err != nil {
+		t.Fatalf("NewRegistry: %v", err)
+	}
+	svc := httpserver.New(context.Background(), cfg, stub, reg, log)
+	ts := httptest.NewServer(svc.Handler())
+	t.Cleanup(ts.Close)
+	return ts
+}
+
+// newTestServerProduction builds a server with Logging.Production=true, so
+// tests can verify that production mode never registers the debug routes.
+func newTestServerProduction(t *testing.T, stub *stubApiv1, appKey string) *httptest.Server {
+	t.Helper()
+	log := zap.NewNop()
+	cfg := testConfig(appKey, false)
+	cfg.Logging.Production = true
 	reg, err := tenant.NewRegistry(cfg, log)
 	if err != nil {
 		t.Fatalf("NewRegistry: %v", err)
@@ -512,6 +550,51 @@ func TestOffer_NotFound_404(t *testing.T) {
 	stub := &stubApiv1{redeemErr: errors.New("not found")}
 	ts := newTestServer(t, stub, "")
 	resp := getJSON(t, ts, "/v1/offer/no-such-tx", "")
+	assertStatus(t, resp, http.StatusNotFound)
+}
+
+// ----------------------------------------------------------------------------
+// Debug endpoint: /debug/issue-dummy-credential
+// ----------------------------------------------------------------------------
+
+func TestDebugIssueDummyCredential_Success(t *testing.T) {
+	stub := &stubApiv1{
+		dummyCredDocID:    "dummy-doc-1",
+		dummyCredOfferURL: "openid-credential-offer://?credential_offer_uri=https://issuer.example.com/credential-offer/dummy-1",
+	}
+	ts := newTestServer(t, stub, "")
+
+	resp := postJSON(t, ts, "/debug/issue-dummy-credential", nil, "")
+	assertStatus(t, resp, http.StatusOK)
+
+	var body map[string]string
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if body["transactionId"] != "dummy-doc-1" {
+		t.Errorf("transactionId: got %q, want %q", body["transactionId"], "dummy-doc-1")
+	}
+	if body["credentialOfferURI"] == "" {
+		t.Error("expected non-empty credentialOfferURI")
+	}
+}
+
+func TestDebugIssueDummyCredential_BackendError_502(t *testing.T) {
+	stub := &stubApiv1{dummyCredErr: errors.New("upload failed")}
+	ts := newTestServer(t, stub, "")
+
+	resp := postJSON(t, ts, "/debug/issue-dummy-credential", nil, "")
+	assertStatus(t, resp, http.StatusBadGateway)
+}
+
+// TestDebugIssueDummyCredential_NotRegisteredInProduction is a safety test:
+// the debug endpoint must never be reachable when the service runs in
+// production mode, regardless of auth configuration.
+func TestDebugIssueDummyCredential_NotRegisteredInProduction(t *testing.T) {
+	stub := &stubApiv1{}
+	ts := newTestServerProduction(t, stub, "")
+
+	resp := postJSON(t, ts, "/debug/issue-dummy-credential", nil, "")
 	assertStatus(t, resp, http.StatusNotFound)
 }
 
