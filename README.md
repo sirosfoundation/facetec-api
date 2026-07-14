@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/sirosfoundation/facetec-api/actions/workflows/ci.yml/badge.svg)](https://github.com/sirosfoundation/facetec-api/actions/workflows/ci.yml)
 [![Coverage](https://codecov.io/gh/sirosfoundation/facetec-api/branch/main/graph/badge.svg)](https://codecov.io/gh/sirosfoundation/facetec-api)
-[![Go Report Card](https://goreportcard.com/badge/github.com/sirosfoundation/facetec-api)](https://goreportcard.com/report/github.com/sirosfoundation/facetec-api)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/sirosfoundation/facetec-api/badge)](https://scorecard.dev/viewer/?uri=github.com/sirosfoundation/facetec-api)
 [![Go](https://img.shields.io/badge/go-1.25-00ADD8?logo=go&logoColor=white)](https://go.dev/dl/)
 [![License](https://img.shields.io/badge/license-BSD--2--Clause-blue)](LICENSE)
 [![Docker](https://img.shields.io/badge/ghcr.io-facetec--api-2496ED?logo=docker&logoColor=white)](https://ghcr.io/sirosfoundation/facetec-api)
