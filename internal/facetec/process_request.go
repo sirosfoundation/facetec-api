@@ -1,12 +1,15 @@
 package facetec
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"math"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/gmrtd/gmrtd/document"
 )
 
 // ProcessRequestRequest matches FaceTec's middleware-friendly request shape.
@@ -104,14 +107,19 @@ func ExtractScanResult(payload map[string]any) (*ScanResult, bool, error) {
 	nfcAuthStatus, _, _ := lookupInt(results["nfcAuthenticationStatusEnumInt"])
 	barcodeStatus, _, _ := lookupInt(results["barcodeStatusEnumInt"])
 
-	// Extract portrait from idScanResultsSoFar; fall back to top-level payload.
-	// FaceTec Server v10 returns the face crop extracted from the ID document
-	// as "photoIDFaceCrop" — a base64-encoded image alongside documentData.
-	portrait, _ := lookupString(results["photoIDFaceCrop"])
-	if portrait == "" {
-		portrait, _ = lookupString(payload["photoIDFaceCrop"])
+	// documentData.Portrait is normally already populated by
+	// parseFaceTecGroupedFields (extracted from the NFC chip's DG2 face
+	// image -- see extractPortraitFromDG2). Some FaceTec configurations may
+	// additionally return a separate, pre-cropped face photo directly under
+	// "photoIDFaceCrop"; prefer that when present, since it's already
+	// cropped/normalized, but don't clobber the NFC-derived portrait with an
+	// empty string when it's absent (confirmed absent in this deployment's
+	// FaceTec Server responses as of 2026-07-29).
+	if portrait, ok := lookupString(results["photoIDFaceCrop"]); ok {
+		documentData.Portrait = portrait
+	} else if portrait, ok := lookupString(payload["photoIDFaceCrop"]); ok {
+		documentData.Portrait = portrait
 	}
-	documentData.Portrait = portrait
 
 	return &ScanResult{
 		Liveness: LivenessCheckResult{
@@ -246,8 +254,46 @@ func parseFaceTecGroupedFields(m map[string]any) (DocumentData, bool, error) {
 		MRZLine1:       fields["mrzLine1"],
 		MRZLine2:       fields["mrzLine2"],
 		MRZLine3:       fields["mrzLine3"],
+		Portrait:       extractPortraitFromDG2(m),
 	}
 	return dd, true, nil
+}
+
+// extractPortraitFromDG2 extracts the face image embedded in the NFC chip's
+// DG2 (Encoded Identification Features — Face) data group, when present.
+//
+// FaceTec Server's NFC read surfaces the raw, undecoded chip files under
+// documentData.nfcValues.rawData, keyed by data group name (e.g. "DG1",
+// "DG2", "SOD"). There is no separate pre-cropped face-photo field in this
+// deployment's responses (confirmed by inspecting real scan payloads) — DG2
+// is the only source of a portrait image. DG2's value is the base64-encoded
+// raw EF.DG2 file (ICAO 9303 BER-TLV, application tag 0x75), which is parsed
+// with gmrtd to pull out the embedded JPEG/JP2 image bytes.
+//
+// Returns "" if nfcValues/rawData/DG2 is absent (e.g. NFC wasn't read, or
+// the chip has no DG2) or fails to parse.
+func extractPortraitFromDG2(documentData map[string]any) string {
+	nfcValues, ok := documentData["nfcValues"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	rawData, ok := nfcValues["rawData"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	dg2B64, ok := rawData["DG2"].(string)
+	if !ok || dg2B64 == "" {
+		return ""
+	}
+	dg2Bytes, err := base64.StdEncoding.DecodeString(dg2B64)
+	if err != nil {
+		return ""
+	}
+	dg2, err := document.NewDG2(dg2Bytes)
+	if err != nil || len(dg2.Images) == 0 || len(dg2.Images[0].Image) == 0 {
+		return ""
+	}
+	return base64.StdEncoding.EncodeToString(dg2.Images[0].Image)
 }
 
 // normalizeFaceTecDate converts FaceTec date formats to YYYY-MM-DD.
