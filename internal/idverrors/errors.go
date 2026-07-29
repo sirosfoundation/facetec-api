@@ -19,6 +19,10 @@ const (
 	CodePolicyRejected Code = "policy_rejected"
 	// CodeSessionExpired indicates the liveness session has expired or was already consumed.
 	CodeSessionExpired Code = "session_expired"
+	// CodeNFCSkipped indicates the user declined/skipped the NFC chip read
+	// (FaceTec Server's nfcStatusEnumInt == NFC_REQUESTED_BUT_USER_PRESSED_SKIP),
+	// so the assurance level required for issuance was not met.
+	CodeNFCSkipped Code = "nfc_skipped"
 	// CodeIssuanceFailed indicates credential issuance failed after successful verification.
 	CodeIssuanceFailed Code = "issuance_failed"
 	// CodeInternalError indicates an unexpected internal error.

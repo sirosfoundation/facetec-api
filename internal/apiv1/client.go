@@ -221,6 +221,20 @@ func (c *Client) ProcessRequest(ctx context.Context, req *facetec.ProcessRequest
 		return resp, nil
 	}
 
+	// Hard gate, independent of per-tenant SPOCP policy thresholds: a user
+	// who was prompted for the NFC chip read and declined it did not reach
+	// the assurance level this credential requires, regardless of how well
+	// the rest of the scan (face match, MRZ, etc.) scored.
+	if scanResult.IDScan.NFCSkipped {
+		c.log.Info("process-request scan rejected: NFC was skipped",
+			zap.String("tenant", tc.ID),
+			zap.String("doc_type", scanResult.IDScan.DocumentData.DocumentType),
+		)
+		resp.CredentialIssueError = "NFC verification was skipped"
+		resp.CredentialIssueErrCode = string(idverrors.CodeNFCSkipped)
+		return resp, nil
+	}
+
 	if err := tc.Policy.EvaluateScan(*scanResult); err != nil {
 		c.log.Info("process-request scan rejected by policy",
 			zap.String("tenant", tc.ID),

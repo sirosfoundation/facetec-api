@@ -36,6 +36,17 @@ type ProcessRequestResponse struct {
 // 3 = USER_CONFIRM, 5 = NFC.
 const photoIDNextStepComplete = 4
 
+// nfcStatusUserSkipped is the value of idScanResultsSoFar.nfcStatusEnumInt
+// meaning the user was prompted for the NFC chip read and declined it.
+// Confirmed empirically against a live FaceTec Server response (not just
+// from FaceTec's docs): a completed session where NFC was skipped reports
+// nfcStatusEnumInt=2 and nfcAuthenticationStatusEnumInt=0, vs. 4 and 4
+// respectively when NFC is read and authenticated successfully.
+// Other documented values: 0 = NO_NFC_SPECIFIED_BY_TEMPLATE,
+// 1 = NFC_REQUESTED_BUT_DEVICE_NOT_CAPABLE,
+// 3 = NFC_REQUESTED_BUT_ERROR_ACCESSING_CHIP, 4 = SUCCESS.
+const nfcStatusUserSkipped = 2
+
 // ExtractScanResult translates a successful FaceTec Server v10 process-request
 // response into the internal ScanResult shape used by policy evaluation and
 // issuance. It returns ok=false when the payload does not yet represent a
@@ -54,6 +65,7 @@ const photoIDNextStepComplete = 4
 //   - idScanResultsSoFar.matchLevel (int) for face match confidence
 //   - idScanResultsSoFar.mrzStatusEnumInt (int) — 2 = SUCCESS
 //   - idScanResultsSoFar.nfcAuthenticationStatusEnumInt (int) — 4 = AUTHENTICATED
+//   - idScanResultsSoFar.nfcStatusEnumInt (int) — 2 = user skipped NFC (see nfcStatusUserSkipped)
 //   - idScanResultsSoFar.barcodeStatusEnumInt (int) — 3 = SUCCESS
 //   - documentData (object or JSON string) inside idScanResultsSoFar
 func ExtractScanResult(payload map[string]any) (*ScanResult, bool, error) {
@@ -105,6 +117,7 @@ func ExtractScanResult(payload map[string]any) (*ScanResult, bool, error) {
 	//   barcodeStatusEnumInt:           3 = SUCCESS
 	mrzStatus, _, _ := lookupInt(results["mrzStatusEnumInt"])
 	nfcAuthStatus, _, _ := lookupInt(results["nfcAuthenticationStatusEnumInt"])
+	nfcStatus, _, _ := lookupInt(results["nfcStatusEnumInt"])
 	barcodeStatus, _, _ := lookupInt(results["barcodeStatusEnumInt"])
 
 	// documentData.Portrait is normally already populated by
@@ -132,6 +145,7 @@ func ExtractScanResult(payload map[string]any) (*ScanResult, bool, error) {
 			DocumentData:    documentData,
 			MRZVerified:     mrzStatus == 2,
 			NFCVerified:     nfcAuthStatus == 4,
+			NFCSkipped:      nfcStatus == nfcStatusUserSkipped,
 			BarcodeVerified: barcodeStatus == 3,
 		},
 	}, true, nil
