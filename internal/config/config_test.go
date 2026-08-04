@@ -156,6 +156,7 @@ func TestValidate_WithoutDeviceKey(t *testing.T) {
 	cfg := &config.Config{
 		FaceTec: config.FaceTecConfig{ServerURL: "https://x"},
 		Issuer:  config.IssuerConfig{Addr: "x", Scope: "s"},
+		JWT:     config.JWTConfig{Secret: "shared-secret"},
 	}
 	if err := cfg.Validate(); err != nil {
 		t.Errorf("unexpected error: device_key should be optional: %v", err)
@@ -182,40 +183,37 @@ func TestValidate_MissingScope(t *testing.T) {
 	}
 }
 
-func TestValidate_ProductionWithoutAppKey(t *testing.T) {
+func TestValidate_RequiresAuthMechanism(t *testing.T) {
 	cfg := &config.Config{
 		FaceTec: config.FaceTecConfig{ServerURL: "https://x", DeviceKey: "k"},
 		Issuer:  config.IssuerConfig{Addr: "x", Scope: "s"},
-		Logging: config.LoggingConfig{Production: true},
 	}
 	if err := cfg.Validate(); err == nil {
-		t.Error("expected error: production mode without jwt.secret or app_key")
+		t.Error("expected error: no jwt.secret or app_key configured")
 	}
 }
 
-func TestValidate_ProductionWithJWTSecret(t *testing.T) {
+func TestValidate_WithJWTSecret(t *testing.T) {
 	cfg := &config.Config{
 		FaceTec: config.FaceTecConfig{ServerURL: "https://x", DeviceKey: "k"},
 		Issuer:  config.IssuerConfig{Addr: "x", Scope: "s"},
-		Logging: config.LoggingConfig{Production: true},
 		JWT:     config.JWTConfig{Secret: "shared-secret"},
 	}
 	if err := cfg.Validate(); err != nil {
-		t.Errorf("unexpected error: jwt.secret set in production: %v", err)
+		t.Errorf("unexpected error: jwt.secret set: %v", err)
 	}
 }
 
-func TestValidate_MultiTenantProductionRequiresJWT(t *testing.T) {
+func TestValidate_MultiTenantRequiresJWT(t *testing.T) {
 	cfg := &config.Config{
 		FaceTec: config.FaceTecConfig{ServerURL: "https://x", DeviceKey: "k"},
 		Issuer:  config.IssuerConfig{Addr: "x", Scope: "s"},
-		Logging: config.LoggingConfig{Production: true},
 		Tenants: []config.TenantConfig{
 			{ID: "acme", Issuer: config.TenantIssuerConfig{Scope: "s"}},
 		},
 	}
 	if err := cfg.Validate(); err == nil {
-		t.Error("expected error: multi-tenant production without jwt.secret")
+		t.Error("expected error: multi-tenant mode without jwt.secret")
 	}
 }
 
@@ -223,7 +221,6 @@ func TestValidate_MultiTenantWithJWT(t *testing.T) {
 	cfg := &config.Config{
 		FaceTec: config.FaceTecConfig{ServerURL: "https://x", DeviceKey: "k"},
 		Issuer:  config.IssuerConfig{Addr: "x", Scope: "s"},
-		Logging: config.LoggingConfig{Production: true},
 		JWT:     config.JWTConfig{Secret: "shared-secret", Issuer: "https://auth.example.org"},
 		Tenants: []config.TenantConfig{
 			{ID: "acme", Issuer: config.TenantIssuerConfig{Scope: "s"}},
@@ -239,18 +236,18 @@ func TestValidate_OK(t *testing.T) {
 	cfg := &config.Config{
 		FaceTec: config.FaceTecConfig{ServerURL: "https://x", DeviceKey: "k"},
 		Issuer:  config.IssuerConfig{Addr: "x", Scope: "s"},
+		JWT:     config.JWTConfig{Secret: "shared-secret"},
 	}
 	if err := cfg.Validate(); err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
 
-func TestValidate_ProductionWithAppKey(t *testing.T) {
+func TestValidate_WithAppKey(t *testing.T) {
 	cfg := &config.Config{
 		FaceTec:  config.FaceTecConfig{ServerURL: "https://x", DeviceKey: "k"},
 		Issuer:   config.IssuerConfig{Addr: "x", Scope: "s"},
 		Security: config.SecurityConfig{AppKey: "secret"},
-		Logging:  config.LoggingConfig{Production: true},
 	}
 	if err := cfg.Validate(); err != nil {
 		t.Errorf("unexpected error: %v", err)

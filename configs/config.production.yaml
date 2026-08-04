@@ -39,4 +39,3 @@ security:
 
 logging:
   level: "info"
-  production: true

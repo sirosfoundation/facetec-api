@@ -188,8 +188,7 @@ type JWTConfig struct {
 
 // LoggingConfig controls log output.
 type LoggingConfig struct {
-	Level      string `yaml:"level"      envconfig:"LOG_LEVEL"`
-	Production bool   `yaml:"production" envconfig:"LOG_PRODUCTION"`
+	Level string `yaml:"level" envconfig:"LOG_LEVEL"`
 }
 
 // AuditConfig controls persistent IPV session audit logging.
@@ -251,15 +250,15 @@ func (c *Config) Validate() error {
 		if c.Issuer.Scope == "" {
 			return fmt.Errorf("config: issuer.scope is required (or define per-tenant in the tenants: block)")
 		}
-		// In production, require at least one auth mechanism.
-		if c.Logging.Production && c.Security.AppKey == "" && c.JWT.Secret == "" {
-			return fmt.Errorf("config: jwt.secret (or legacy security.app_key) is required in production")
+		// Require at least one auth mechanism.
+		if c.Security.AppKey == "" && c.JWT.Secret == "" {
+			return fmt.Errorf("config: jwt.secret (or legacy security.app_key) is required")
 		}
 	} else {
 		// Multi-tenant mode: JWT is the only supported auth mechanism.
 		// Plain per-tenant app keys are not supported — use jwt.secret.
-		if c.JWT.Secret == "" && c.Logging.Production {
-			return fmt.Errorf("config: jwt.secret is required in production multi-tenant mode")
+		if c.JWT.Secret == "" {
+			return fmt.Errorf("config: jwt.secret is required in multi-tenant mode")
 		}
 		// Validate each tenant entry.
 		ids := make(map[string]bool, len(c.Tenants))

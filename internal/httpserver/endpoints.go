@@ -74,32 +74,6 @@ func (s *Service) endpointProcessRequest(c *gin.Context) {
 	s.respond(c, http.StatusOK, resp.Payload)
 }
 
-// debugDummyCredentialResponse mirrors idScanResponse's shape for consistency
-// with the real /v1/id-scan and /process-request flows.
-type debugDummyCredentialResponse struct {
-	TransactionID      string `json:"transactionId"`
-	CredentialOfferURI string `json:"credentialOfferURI"`
-}
-
-// endpointIssueDummyCredential runs the issuance pipeline against fixed
-// placeholder identity data, bypassing FaceTec entirely. Only registered
-// outside production mode — see Service.registerRoutes.
-//
-//	POST /debug/issue-dummy-credential
-//	→ 200 { "transactionId": "...", "credentialOfferURI": "openid-credential-offer://..." }
-func (s *Service) endpointIssueDummyCredential(c *gin.Context) {
-	docID, offerURL, err := s.apiv1.IssueDummyCredential(c.Request.Context())
-	if err != nil {
-		s.fail(c, http.StatusBadGateway, err, "issue-dummy-credential failed")
-		return
-	}
-
-	s.respond(c, http.StatusOK, debugDummyCredentialResponse{
-		TransactionID:      docID,
-		CredentialOfferURI: offerURL,
-	})
-}
-
 // LivenessScanRequest is the body expected by POST /v1/liveness.
 // The FaceScan and AuditTrail fields contain raw biometric data; they must not be logged.
 type LivenessScanRequest struct {

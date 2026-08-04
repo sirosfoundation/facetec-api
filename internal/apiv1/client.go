@@ -267,57 +267,6 @@ func (c *Client) ProcessRequest(ctx context.Context, req *facetec.ProcessRequest
 	return resp, nil
 }
 
-// IssueDummyCredential runs the credential-issuance pipeline (upload + preauth_offer)
-// against fixed, non-biometric placeholder identity data, entirely bypassing the FaceTec
-// SDK / scan flow. It exists to let facetec-api's integration with the vc apigw be tested
-// in seconds instead of minutes, without needing a real device scan for every iteration.
-//
-// TEMPORARY DEBUG TOOL: registered only when the service is not running in production
-// mode (see httpserver.registerRoutes). It skips SPOCP policy evaluation entirely, since
-// there is no real scan result to evaluate — it goes straight to issuance.
-func (c *Client) IssueDummyCredential(ctx context.Context) (documentID string, offerURL string, err error) {
-	tc, ok := tenant.FromStdContext(ctx)
-	if !ok {
-		return "", "", fmt.Errorf("issue-dummy-credential: tenant context missing")
-	}
-
-	dummy := facetec.ScanResult{
-		Liveness: facetec.LivenessCheckResult{Success: true, LivenessScore: 1.0},
-		IDScan: facetec.IDScanResult{
-			Success:        true,
-			FaceMatchLevel: 7,
-			DocumentData: facetec.DocumentData{
-				GivenName:      "Jane",
-				FamilyName:     "Doe",
-				DateOfBirth:    "1990-01-01",
-				Nationality:    "NL",
-				DateOfExpiry:   "2030-01-01",
-				DocumentNumber: "DEBUG-DUMMY-0001",
-				IssuingCountry: "NL",
-				Sex:            "F",
-				DocumentType:   "passport",
-			},
-			MRZVerified:     true,
-			NFCVerified:     true,
-			BarcodeVerified: true,
-		},
-	}
-
-	docID, offerURL, err := c.issueCredential(ctx, dummy, tc.Issuer)
-	if err != nil {
-		c.log.Error("issue-dummy-credential failed", zap.Error(err))
-		return "", "", err
-	}
-
-	c.log.Info("AUDIT dummy_credential_issued",
-		zap.String("tenant", tc.ID),
-		zap.String("document_id", docID),
-		zap.String("format", tc.Issuer.Format),
-		zap.String("scope", tc.Issuer.Scope),
-	)
-	return docID, offerURL, nil
-}
-
 // RedeemOffer retrieves and atomically removes a credential offer by transaction ID.
 // The offer is one-time-use; a second call with the same ID returns an error.
 func (c *Client) RedeemOffer(ctx context.Context, txID string) (*session.OfferEntry, error) {

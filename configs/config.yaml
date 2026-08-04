@@ -103,8 +103,6 @@ jwt:
 logging:
   # Log level: debug, info, warn, error
   level: "info"
-  # Set true for JSON structured logging (recommended in production).
-  production: false
 
 # ── Tenant overrides (optional) ───────────────────────────────────────────────
 # When this block is absent, a single "default" tenant is synthesised from the
