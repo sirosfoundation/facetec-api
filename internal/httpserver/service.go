@@ -29,9 +29,7 @@ type Service struct {
 // New creates and configures the HTTP service but does not start listening.
 // registry is used to resolve Bearer tokens to tenant contexts on every request.
 func New(_ context.Context, cfg *config.Config, apiv1 Apiv1, registry *tenant.Registry, log *zap.Logger) *Service {
-	if cfg.Logging.Production {
-		gin.SetMode(gin.ReleaseMode)
-	}
+	gin.SetMode(gin.ReleaseMode)
 
 	// Use gin.New() (not gin.Default()) so we control every middleware and
 	// never accidentally log request bodies that may contain biometric data.
@@ -126,15 +124,6 @@ func (s *Service) registerRoutes(r *gin.Engine, registry *tenant.Registry) {
 
 		// Offer redemption — authenticated, no rate limit (wallet pull).
 		v1.GET("/offer/:txid", s.endpointOffer)
-	}
-
-	// Debug-only routes — never registered in production, regardless of
-	// whether TenantAuth would otherwise permit the request. Lets local dev
-	// exercise the vc apigw integration (upload + preauth_offer) in seconds,
-	// without a real device scan for every iteration.
-	if !s.cfg.Logging.Production {
-		debug := r.Group("/debug", auth)
-		debug.POST("/issue-dummy-credential", s.endpointIssueDummyCredential)
 	}
 }
 

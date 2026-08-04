@@ -78,7 +78,6 @@ by environment variables. The full annotated reference is [configs/config.yaml](
 | `session.liveness_ttl` | `SESSION_LIVENESS_TTL` | `2m` | How long a FaceMap is held in memory |
 | `session.offer_ttl` | `SESSION_OFFER_TTL` | `5m` | How long a credential offer is held in memory |
 | `logging.level` | `LOG_LEVEL` | `info` | Log level: `debug`, `info`, `warn`, `error` |
-| `logging.production` | `LOG_PRODUCTION` | `false` | Enable JSON structured logging (recommended in prod) |
 
 Numeric acceptance thresholds are encoded in the SPOCP rule files themselves rather than as
 separate config keys. This keeps deployment policy in one place and allows per-tenant rule sets
@@ -348,8 +347,8 @@ metrics. Scans below configured thresholds are rejected or escalated.
 - **Security response headers.** `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`,
   `Cache-Control: no-store` on every response.
 - **HTTP timeouts.** `ReadHeaderTimeout: 10s`, `WriteTimeout: 90s`, `IdleTimeout: 120s`.
-- **Production safety guard.** With `logging.production: true`, startup fails unless at least
-  one of `jwt.secret` or `security.app_key` is set.
+- **Auth required.** Startup fails unless at least one of `jwt.secret` or `security.app_key`
+  is set.
 - **Atomic SIGHUP reload.** The tenant registry is swapped atomically on SIGHUP; in-flight
   requests are unaffected.
 

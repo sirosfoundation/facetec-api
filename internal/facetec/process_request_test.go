@@ -134,6 +134,61 @@ func TestExtractScanResult_NFC_Passed(t *testing.T) {
 	}
 }
 
+// TestExtractScanResult_NFCSkipped verifies NFCSkipped is set when
+// nfcStatusEnumInt reports the user declined the NFC chip read
+// (NFC_REQUESTED_BUT_USER_PRESSED_SKIP=2), confirmed against a real captured
+// FaceTec Server response where a completed session (photoIDNextStepEnumInt=4)
+// reported nfcStatusEnumInt=2 and nfcAuthenticationStatusEnumInt=0.
+func TestExtractScanResult_NFCSkipped(t *testing.T) {
+	p := realPayload()
+	results := p["idScanResultsSoFar"].(map[string]any)
+	results["nfcStatusEnumInt"] = float64(2)
+	results["nfcAuthenticationStatusEnumInt"] = float64(0)
+	result, ok, err := ExtractScanResult(p)
+	if err != nil || !ok {
+		t.Fatalf("err=%v ok=%v", err, ok)
+	}
+	if !result.IDScan.NFCSkipped {
+		t.Error("NFCSkipped: want true (nfcStatusEnumInt=2, USER_PRESSED_SKIP)")
+	}
+	if result.IDScan.NFCVerified {
+		t.Error("NFCVerified: want false when NFC was skipped")
+	}
+}
+
+// TestExtractScanResult_NFCCompleted_NotSkipped verifies NFCSkipped is false
+// on a fully successful NFC read (nfcStatusEnumInt=4, matching the SUCCESS
+// value confirmed against a real captured FaceTec Server response).
+func TestExtractScanResult_NFCCompleted_NotSkipped(t *testing.T) {
+	p := realPayload()
+	results := p["idScanResultsSoFar"].(map[string]any)
+	results["nfcStatusEnumInt"] = float64(4)
+	results["nfcAuthenticationStatusEnumInt"] = float64(4)
+	result, ok, err := ExtractScanResult(p)
+	if err != nil || !ok {
+		t.Fatalf("err=%v ok=%v", err, ok)
+	}
+	if result.IDScan.NFCSkipped {
+		t.Error("NFCSkipped: want false when NFC completed successfully")
+	}
+	if !result.IDScan.NFCVerified {
+		t.Error("NFCVerified: want true when NFC completed successfully")
+	}
+}
+
+// TestExtractScanResult_NFCStatusDefault_NotSkipped covers realPayload()'s
+// own baseline nfcStatusEnumInt value (6, an in-progress/other status) to
+// confirm it is never mistaken for the skip value (2).
+func TestExtractScanResult_NFCStatusDefault_NotSkipped(t *testing.T) {
+	result, ok, err := ExtractScanResult(realPayload())
+	if err != nil || !ok {
+		t.Fatalf("err=%v ok=%v", err, ok)
+	}
+	if result.IDScan.NFCSkipped {
+		t.Error("NFCSkipped: want false for realPayload()'s baseline nfcStatusEnumInt")
+	}
+}
+
 func TestExtractScanResult_Barcode_Passed(t *testing.T) {
 	p := realPayload()
 	results := p["idScanResultsSoFar"].(map[string]any)
@@ -373,6 +428,39 @@ func TestExtractScanResult_PortraitAbsent(t *testing.T) {
 	}
 	if result.IDScan.DocumentData.Portrait != "" {
 		t.Errorf("Portrait: got %q, want empty", result.IDScan.DocumentData.Portrait)
+	}
+}
+
+// TestExtractScanResult_NFCStatusEnumIntParseError_IsFatal proves a
+// malformed nfcStatusEnumInt is treated as a hard error, not silently
+// swallowed into "not skipped" -- since NFCSkipped drives a hard issuance
+// gate, failing open here would be a security bug.
+func TestExtractScanResult_NFCStatusEnumIntParseError_IsFatal(t *testing.T) {
+	p := realPayload()
+	results := p["idScanResultsSoFar"].(map[string]any)
+	results["nfcStatusEnumInt"] = "not-a-number"
+	_, ok, err := ExtractScanResult(p)
+	if err == nil {
+		t.Fatal("expected error for malformed nfcStatusEnumInt, got nil")
+	}
+	if ok {
+		t.Error("expected ok=false alongside the error")
+	}
+}
+
+// TestExtractScanResult_NFCStatusEnumIntAbsent_NotFatal proves mere absence
+// (as opposed to a malformed value) of nfcStatusEnumInt is still tolerated,
+// same as the other status enums -- only parse errors are fatal.
+func TestExtractScanResult_NFCStatusEnumIntAbsent_NotFatal(t *testing.T) {
+	p := realPayload()
+	results := p["idScanResultsSoFar"].(map[string]any)
+	delete(results, "nfcStatusEnumInt")
+	result, ok, err := ExtractScanResult(p)
+	if err != nil || !ok {
+		t.Fatalf("err=%v ok=%v", err, ok)
+	}
+	if result.IDScan.NFCSkipped {
+		t.Error("NFCSkipped: want false when nfcStatusEnumInt is simply absent")
 	}
 }
 

@@ -138,12 +138,7 @@ func main() {
 }
 
 func buildLogger(cfg *config.Config) (*zap.Logger, error) {
-	var zapCfg zap.Config
-	if cfg.Logging.Production {
-		zapCfg = zap.NewProductionConfig()
-	} else {
-		zapCfg = zap.NewDevelopmentConfig()
-	}
+	zapCfg := zap.NewDevelopmentConfig()
 	switch cfg.Logging.Level {
 	case "debug":
 		zapCfg.Level.SetLevel(zap.DebugLevel)

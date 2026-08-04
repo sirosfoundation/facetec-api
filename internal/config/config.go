@@ -182,14 +182,18 @@ type JWTConfig struct {
 	Issuer string `yaml:"issuer" envconfig:"JWT_ISSUER"`
 	// RequireAuth, when true, rejects requests that carry no valid Bearer JWT.
 	// When false (default), unauthenticated requests receive the default tenant
-	// context — suitable for development and gradual rollout.
+	// context — suitable for development and gradual rollout. This is
+	// independent of whether a secret is configured at all: Validate requires
+	// jwt.secret (or the legacy security.app_key) to be set unconditionally,
+	// but that only determines which auth *mechanism* TenantAuth wires up
+	// (see middleware.TenantAuth) — RequireAuth still separately controls
+	// whether presenting a token is actually mandatory per-request.
 	RequireAuth bool `yaml:"require_auth" envconfig:"JWT_REQUIRE_AUTH"`
 }
 
 // LoggingConfig controls log output.
 type LoggingConfig struct {
-	Level      string `yaml:"level"      envconfig:"LOG_LEVEL"`
-	Production bool   `yaml:"production" envconfig:"LOG_PRODUCTION"`
+	Level string `yaml:"level" envconfig:"LOG_LEVEL"`
 }
 
 // AuditConfig controls persistent IPV session audit logging.
@@ -251,15 +255,20 @@ func (c *Config) Validate() error {
 		if c.Issuer.Scope == "" {
 			return fmt.Errorf("config: issuer.scope is required (or define per-tenant in the tenants: block)")
 		}
-		// In production, require at least one auth mechanism.
-		if c.Logging.Production && c.Security.AppKey == "" && c.JWT.Secret == "" {
-			return fmt.Errorf("config: jwt.secret (or legacy security.app_key) is required in production")
+		// Require at least one auth mechanism to be configured, unconditionally
+		// (not just "in production" — see git history for the prior, weaker
+		// behavior this replaced). Note this is orthogonal to JWT.RequireAuth:
+		// this check only ensures TenantAuth has *something* to validate
+		// against; whether unauthenticated requests are actually rejected at
+		// runtime is still controlled separately by JWT.RequireAuth.
+		if c.Security.AppKey == "" && c.JWT.Secret == "" {
+			return fmt.Errorf("config: jwt.secret (or legacy security.app_key) is required")
 		}
 	} else {
 		// Multi-tenant mode: JWT is the only supported auth mechanism.
 		// Plain per-tenant app keys are not supported — use jwt.secret.
-		if c.JWT.Secret == "" && c.Logging.Production {
-			return fmt.Errorf("config: jwt.secret is required in production multi-tenant mode")
+		if c.JWT.Secret == "" {
+			return fmt.Errorf("config: jwt.secret is required in multi-tenant mode")
 		}
 		// Validate each tenant entry.
 		ids := make(map[string]bool, len(c.Tenants))

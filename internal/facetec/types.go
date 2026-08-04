@@ -49,6 +49,12 @@ type IDScanResult struct {
 	NFCVerified     bool         `json:"nfcVerified"`
 	BarcodeVerified bool         `json:"barcodeVerified"`
 	MRZVerified     bool         `json:"mrzVerified"`
+	// NFCSkipped is true when the user declined the NFC chip read step
+	// (idScanResultsSoFar.nfcStatusEnumInt == NFC_REQUESTED_BUT_USER_PRESSED_SKIP,
+	// confirmed empirically against a live FaceTec Server response). Only
+	// ever set by ExtractScanResult (the /process-request path); always
+	// false for the legacy /match-3d-3d JSON-decoded path.
+	NFCSkipped bool `json:"nfcSkipped"`
 }
 
 // DocumentData contains the OCR-extracted identity fields from the scanned document.
