@@ -431,6 +431,39 @@ func TestExtractScanResult_PortraitAbsent(t *testing.T) {
 	}
 }
 
+// TestExtractScanResult_NFCStatusEnumIntParseError_IsFatal proves a
+// malformed nfcStatusEnumInt is treated as a hard error, not silently
+// swallowed into "not skipped" -- since NFCSkipped drives a hard issuance
+// gate, failing open here would be a security bug.
+func TestExtractScanResult_NFCStatusEnumIntParseError_IsFatal(t *testing.T) {
+	p := realPayload()
+	results := p["idScanResultsSoFar"].(map[string]any)
+	results["nfcStatusEnumInt"] = "not-a-number"
+	_, ok, err := ExtractScanResult(p)
+	if err == nil {
+		t.Fatal("expected error for malformed nfcStatusEnumInt, got nil")
+	}
+	if ok {
+		t.Error("expected ok=false alongside the error")
+	}
+}
+
+// TestExtractScanResult_NFCStatusEnumIntAbsent_NotFatal proves mere absence
+// (as opposed to a malformed value) of nfcStatusEnumInt is still tolerated,
+// same as the other status enums -- only parse errors are fatal.
+func TestExtractScanResult_NFCStatusEnumIntAbsent_NotFatal(t *testing.T) {
+	p := realPayload()
+	results := p["idScanResultsSoFar"].(map[string]any)
+	delete(results, "nfcStatusEnumInt")
+	result, ok, err := ExtractScanResult(p)
+	if err != nil || !ok {
+		t.Fatalf("err=%v ok=%v", err, ok)
+	}
+	if result.IDScan.NFCSkipped {
+		t.Error("NFCSkipped: want false when nfcStatusEnumInt is simply absent")
+	}
+}
+
 func TestExtractScanResult_NoMatchLevel(t *testing.T) {
 	p := realPayload()
 	results := p["idScanResultsSoFar"].(map[string]any)

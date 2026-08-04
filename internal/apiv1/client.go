@@ -129,9 +129,10 @@ func (c *Client) SubmitLiveness(ctx context.Context, req *facetec.LivenessCheckR
 //  1. Retrieves and consumes the in-memory FaceMap ([]byte) for livenessSessionID.
 //  2. Forwards the combined request to the FaceTec Server (FaceMap converted to string for JSON).
 //  3. Immediately zeros the FaceMap bytes via defer.
-//  4. Evaluates the combined ScanResult against numeric thresholds and tenant policy.
-//  5. On policy pass, issues a credential using the configured issuer client flow.
-//  6. Returns the issued document ID and credential offer URL.
+//  4. Rejects outright if NFC wasn't verified (see the NFCVerified check below).
+//  5. Evaluates the combined ScanResult against numeric thresholds and tenant policy.
+//  6. On policy pass, issues a credential using the configured issuer client flow.
+//  7. Returns the issued document ID and credential offer URL.
 func (c *Client) SubmitIDScan(ctx context.Context, livenessSessionID string, idScanReq *facetec.IDScanRequest) (string, string, error) {
 	lv, err := c.sessions.TakeLiveness(livenessSessionID)
 	if err != nil {
@@ -162,6 +163,22 @@ func (c *Client) SubmitIDScan(ctx context.Context, livenessSessionID string, idS
 	tc, ok := tenant.FromStdContext(ctx)
 	if !ok {
 		return "", "", fmt.Errorf("id-scan: tenant context missing from request")
+	}
+
+	// Same hard gate as ProcessRequest's NFCSkipped check, adapted to this
+	// legacy path's response shape. FaceTec's /match-3d-3d response (decoded
+	// directly into IDScanResult) only carries a plain NFCVerified bool, with
+	// no equivalent to /process-request's nfcStatusEnumInt that would let us
+	// distinguish "skipped" from "attempted and failed" -- so both are
+	// treated as not meeting the required assurance level. Without this,
+	// /v1/liveness + /v1/id-scan would be a way to issue credentials that
+	// completely bypasses the NFC requirement enforced on /process-request.
+	if !idScanResult.NFCVerified {
+		c.log.Info("id-scan scan rejected: NFC not verified",
+			zap.String("tenant", tc.ID),
+			zap.String("doc_type", idScanResult.DocumentData.DocumentType),
+		)
+		return "", "", idverrors.New(idverrors.CodeNFCSkipped, "NFC verification was skipped or failed")
 	}
 
 	if err := tc.Policy.EvaluateScan(scanResult); err != nil {

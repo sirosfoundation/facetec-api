@@ -1,9 +1,11 @@
 package apiv1
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -13,6 +15,7 @@ import (
 	"github.com/sirosfoundation/facetec-api/internal/facetec"
 	"github.com/sirosfoundation/facetec-api/internal/idverrors"
 	"github.com/sirosfoundation/facetec-api/internal/policy"
+	"github.com/sirosfoundation/facetec-api/internal/session"
 	"github.com/sirosfoundation/facetec-api/internal/tenant"
 )
 
@@ -124,4 +127,87 @@ func TestProcessRequest_NFCCompleted_DoesNotTriggerSkipGate(t *testing.T) {
 
 	assert.Equal(t, string(idverrors.CodePolicyRejected), resp.CredentialIssueErrCode)
 	assert.NotEqual(t, string(idverrors.CodeNFCSkipped), resp.CredentialIssueErrCode)
+}
+
+// idScanServerStub returns an httptest.Server standing in for the FaceTec
+// Server's /match-3d-3d endpoint (legacy /v1/id-scan path), always replying
+// with the given raw JSON IDScanResult body.
+func idScanServerStub(t *testing.T, body string) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(body))
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func newTestClientForIDScan(t *testing.T, idScanBody string) (*Client, string) {
+	t.Helper()
+	ft := idScanServerStub(t, idScanBody)
+	sessions := session.New(time.Minute, time.Minute)
+	livenessID, err := sessions.PutLiveness([]byte("fake-facemap"), 1.0)
+	require.NoError(t, err)
+	c := &Client{
+		cfg:      &config.Config{},
+		log:      zap.NewNop(),
+		ft:       facetec.NewClient(ft.URL, "", http.DefaultClient),
+		sessions: sessions,
+	}
+	return c, livenessID
+}
+
+// TestSubmitIDScan_NFCNotVerified_RejectsWithoutIssuing proves the legacy
+// /v1/id-scan path (SubmitIDScan -> FaceTec's /match-3d-3d) cannot be used
+// to bypass the NFC requirement enforced on /process-request. FaceTec's
+// /match-3d-3d response has no equivalent to nfcStatusEnumInt, only a plain
+// NFCVerified bool -- so this path treats "not verified" (which covers both
+// "skipped" and "attempted and failed") as disqualifying, same as the hard
+// gate on the /process-request path.
+func TestSubmitIDScan_NFCNotVerified_RejectsWithoutIssuing(t *testing.T) {
+	c, livenessID := newTestClientForIDScan(t, `{
+		"success": true,
+		"faceMatchLevel": 7,
+		"nfcVerified": false,
+		"mrzVerified": true,
+		"barcodeVerified": true,
+		"documentData": {"givenName": "Alice", "familyName": "Test", "documentType": "passport"}
+	}`)
+	tc := &tenant.Context{ID: "test-tenant", Policy: noRulesPolicy(t)}
+	ctx := tenant.WithStdContext(t.Context(), tc)
+
+	docID, offerURL, err := c.SubmitIDScan(ctx, livenessID, &facetec.IDScanRequest{})
+	require.Error(t, err)
+	assert.Empty(t, docID)
+	assert.Empty(t, offerURL)
+
+	var idvErr *idverrors.Error
+	require.True(t, errors.As(err, &idvErr))
+	assert.Equal(t, idverrors.CodeNFCSkipped, idvErr.Code)
+}
+
+// TestSubmitIDScan_NFCVerified_DoesNotTriggerSkipGate is the inverse check:
+// a scan with NFC verified must not be rejected by the gate. tc.Policy is
+// the always-rejecting noRulesPolicy, so the scan is still ultimately
+// rejected -- but by CodePolicyRejected, proving the NFC gate was correctly
+// bypassed rather than incorrectly firing.
+func TestSubmitIDScan_NFCVerified_DoesNotTriggerSkipGate(t *testing.T) {
+	c, livenessID := newTestClientForIDScan(t, `{
+		"success": true,
+		"faceMatchLevel": 7,
+		"nfcVerified": true,
+		"mrzVerified": true,
+		"barcodeVerified": true,
+		"documentData": {"givenName": "Alice", "familyName": "Test", "documentType": "passport"}
+	}`)
+	tc := &tenant.Context{ID: "test-tenant", Policy: noRulesPolicy(t)}
+	ctx := tenant.WithStdContext(t.Context(), tc)
+
+	_, _, err := c.SubmitIDScan(ctx, livenessID, &facetec.IDScanRequest{})
+	require.Error(t, err)
+
+	var idvErr *idverrors.Error
+	require.True(t, errors.As(err, &idvErr))
+	assert.Equal(t, idverrors.CodePolicyRejected, idvErr.Code)
+	assert.NotEqual(t, idverrors.CodeNFCSkipped, idvErr.Code)
 }

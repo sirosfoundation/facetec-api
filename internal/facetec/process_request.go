@@ -117,8 +117,19 @@ func ExtractScanResult(payload map[string]any) (*ScanResult, bool, error) {
 	//   barcodeStatusEnumInt:           3 = SUCCESS
 	mrzStatus, _, _ := lookupInt(results["mrzStatusEnumInt"])
 	nfcAuthStatus, _, _ := lookupInt(results["nfcAuthenticationStatusEnumInt"])
-	nfcStatus, _, _ := lookupInt(results["nfcStatusEnumInt"])
 	barcodeStatus, _, _ := lookupInt(results["barcodeStatusEnumInt"])
+
+	// nfcStatusEnumInt directly drives the NFCSkipped hard issuance gate
+	// (see nfcStatusUserSkipped below), unlike the other status enums above,
+	// which only ever feed into SPOCP policy scoring. A parse error here
+	// (as opposed to the field simply being absent, which is tolerated and
+	// treated as "not skipped") must not be silently swallowed into 0/false --
+	// that would fail open, letting a scan with an unreadable NFC status
+	// through as if NFC had never been skipped.
+	nfcStatus, _, err := lookupInt(results["nfcStatusEnumInt"])
+	if err != nil {
+		return nil, false, fmt.Errorf("facetec: nfcStatusEnumInt: %w", err)
+	}
 
 	// documentData.Portrait is normally already populated by
 	// parseFaceTecGroupedFields (extracted from the NFC chip's DG2 face
