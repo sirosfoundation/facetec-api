@@ -2,6 +2,7 @@ package facetec
 
 import (
 	"testing"
+	"time"
 )
 
 // faceTecDocumentDataJSON is a realistic FaceTec Server v10 documentData JSON
@@ -358,6 +359,27 @@ func TestExtractScanResult_FlatDocumentDataBackwardCompat(t *testing.T) {
 	}
 	if result.IDScan.DocumentData.DocumentNumber != "X999" {
 		t.Errorf("DocumentNumber: got %q, want X999", result.IDScan.DocumentData.DocumentNumber)
+	}
+}
+
+func TestDocumentExpired(t *testing.T) {
+	// 00:30 in UTC+2 on 1 Oct is still 30 Sep in UTC. Expiry is a calendar date
+	// compared against that UTC date, and the document is valid on the day itself.
+	now := time.Date(2026, 10, 1, 0, 30, 0, 0, time.FixedZone("CEST", 2*60*60))
+	cases := []struct {
+		expiry string
+		want   bool
+	}{
+		{"2026-09-29", true},
+		{"2026-09-30", false},
+		{"2026-10-01", false},
+		{"", false},
+		{"not-a-date", false},
+	}
+	for _, tc := range cases {
+		if got := DocumentExpired(tc.expiry, now); got != tc.want {
+			t.Errorf("DocumentExpired(%q) = %v, want %v", tc.expiry, got, tc.want)
+		}
 	}
 }
 

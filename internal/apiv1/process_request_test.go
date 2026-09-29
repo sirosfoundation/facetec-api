@@ -1,9 +1,12 @@
 package apiv1
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -114,9 +117,9 @@ func TestProcessRequest_NFCSkipped_RejectsWithoutIssuing(t *testing.T) {
 
 // TestProcessRequest_NFCCompleted_DoesNotTriggerSkipGate is the inverse
 // check: a scan with NFC successfully read must not be rejected by the skip
-// gate. tc.Policy is the always-rejecting noRulesPolicy, so the scan is
-// still ultimately rejected -- but by CodePolicyRejected, proving the skip
-// gate was correctly bypassed rather than incorrectly firing.
+// gate. The payload is a passport with no chip files (no EF.SOD), so the
+// passive-authentication gate rejects it before policy. That code is not
+// CodeNFCSkipped, which proves the skip gate was bypassed.
 func TestProcessRequest_NFCCompleted_DoesNotTriggerSkipGate(t *testing.T) {
 	c := newTestClientForProcessRequest(t, nfcCompletedPayload)
 	tc := &tenant.Context{ID: "test-tenant", Policy: noRulesPolicy(t)}
@@ -125,8 +128,98 @@ func TestProcessRequest_NFCCompleted_DoesNotTriggerSkipGate(t *testing.T) {
 	resp, err := c.ProcessRequest(ctx, &facetec.ProcessRequestRequest{RequestBlob: "opaque"})
 	require.NoError(t, err)
 
-	assert.Equal(t, string(idverrors.CodePolicyRejected), resp.CredentialIssueErrCode)
+	assert.Equal(t, string(idverrors.CodeSignerUntrusted), resp.CredentialIssueErrCode)
 	assert.NotEqual(t, string(idverrors.CodeNFCSkipped), resp.CredentialIssueErrCode)
+	assert.Empty(t, resp.TransactionID)
+}
+
+// passportChipPayload is a passport scan whose nfcValues.rawData carries the
+// given EF.SOD (base64) and countryCode.
+func passportChipPayload(t *testing.T, sodB64, countryCode string) string {
+	t.Helper()
+	sodJSON, err := json.Marshal(sodB64)
+	require.NoError(t, err)
+	return `{
+		"idScanResultsSoFar": {
+			"photoIDNextStepEnumInt": 4,
+			"matchLevel": 7,
+			"nfcStatusEnumInt": 4,
+			"nfcAuthenticationStatusEnumInt": 4,
+			"mrzStatusEnumInt": 2,
+			"documentData": {
+				"templateInfo": {"templateType": "Passport"},
+				"mrzValues": {"groups": [{"fields": [
+					{"fieldKey": "countryCode", "value": "` + countryCode + `"},
+					{"fieldKey": "firstName", "value": "ANNA"}
+				]}]},
+				"nfcValues": {"rawData": {"SOD": ` + string(sodJSON) + `}}
+			}
+		}
+	}`
+}
+
+func austrianSODFixture(t *testing.T) string {
+	t.Helper()
+	sod, err := os.ReadFile("../facetec/testdata/at_sod.b64")
+	require.NoError(t, err)
+	return strings.TrimSpace(string(sod))
+}
+
+// TestProcessRequest_ExpiredDocument_Rejected proves an expiry date before
+// today stops issuance before policy. The document is not a passport, so the
+// chip gate does not run; noRulesPolicy would otherwise return
+// CodePolicyRejected.
+func TestProcessRequest_ExpiredDocument_Rejected(t *testing.T) {
+	body := `{
+		"idScanResultsSoFar": {
+			"photoIDNextStepEnumInt": 4,
+			"matchLevel": 7,
+			"nfcStatusEnumInt": 4,
+			"nfcAuthenticationStatusEnumInt": 4,
+			"mrzStatusEnumInt": 2,
+			"documentData": {"documentType": "dl", "dateOfExpiry": "2000-01-01"}
+		}
+	}`
+	c := newTestClientForProcessRequest(t, body)
+	tc := &tenant.Context{ID: "test-tenant", Policy: noRulesPolicy(t)}
+	ctx := tenant.WithStdContext(t.Context(), tc)
+
+	resp, err := c.ProcessRequest(ctx, &facetec.ProcessRequestRequest{RequestBlob: "opaque"})
+	require.NoError(t, err)
+
+	assert.Equal(t, string(idverrors.CodeDocumentExpired), resp.CredentialIssueErrCode)
+	assert.Empty(t, resp.TransactionID)
+}
+
+// TestProcessRequest_PassportMissingDataGroups_Rejected proves a passport
+// whose EF.SOD chains to the Austrian CSCA is still rejected when DG1 and
+// DG2 are absent. Those files are what the credential is issued from, so
+// they must be bound to the signature.
+func TestProcessRequest_PassportMissingDataGroups_Rejected(t *testing.T) {
+	c := newTestClientForProcessRequest(t, passportChipPayload(t, austrianSODFixture(t), "AUT"))
+	tc := &tenant.Context{ID: "test-tenant", Policy: noRulesPolicy(t)}
+	ctx := tenant.WithStdContext(t.Context(), tc)
+
+	resp, err := c.ProcessRequest(ctx, &facetec.ProcessRequestRequest{RequestBlob: "opaque"})
+	require.NoError(t, err)
+
+	assert.Equal(t, string(idverrors.CodeSignerUntrusted), resp.CredentialIssueErrCode)
+	assert.Empty(t, resp.TransactionID)
+}
+
+// TestProcessRequest_PassportSignerCountryMismatch_Rejected proves the gate
+// binds the chip's document signer to the scanned countryCode: a genuine
+// Austrian SOD presented as a Swedish passport is rejected.
+func TestProcessRequest_PassportSignerCountryMismatch_Rejected(t *testing.T) {
+	c := newTestClientForProcessRequest(t, passportChipPayload(t, austrianSODFixture(t), "SWE"))
+	tc := &tenant.Context{ID: "test-tenant", Policy: noRulesPolicy(t)}
+	ctx := tenant.WithStdContext(t.Context(), tc)
+
+	resp, err := c.ProcessRequest(ctx, &facetec.ProcessRequestRequest{RequestBlob: "opaque"})
+	require.NoError(t, err)
+
+	assert.Equal(t, string(idverrors.CodeSignerUntrusted), resp.CredentialIssueErrCode)
+	assert.Empty(t, resp.TransactionID)
 }
 
 // idScanServerStub returns an httptest.Server standing in for the FaceTec
@@ -198,7 +291,7 @@ func TestSubmitIDScan_NFCVerified_DoesNotTriggerSkipGate(t *testing.T) {
 		"nfcVerified": true,
 		"mrzVerified": true,
 		"barcodeVerified": true,
-		"documentData": {"givenName": "Alice", "familyName": "Test", "documentType": "passport"}
+		"documentData": {"givenName": "Alice", "familyName": "Test", "documentType": "passport", "dateOfExpiry": "2099-01-01"}
 	}`)
 	tc := &tenant.Context{ID: "test-tenant", Policy: noRulesPolicy(t)}
 	ctx := tenant.WithStdContext(t.Context(), tc)
@@ -210,4 +303,23 @@ func TestSubmitIDScan_NFCVerified_DoesNotTriggerSkipGate(t *testing.T) {
 	require.True(t, errors.As(err, &idvErr))
 	assert.Equal(t, idverrors.CodePolicyRejected, idvErr.Code)
 	assert.NotEqual(t, idverrors.CodeNFCSkipped, idvErr.Code)
+	assert.NotEqual(t, idverrors.CodeDocumentExpired, idvErr.Code)
+}
+
+func TestSubmitIDScan_ExpiredDocument_Rejected(t *testing.T) {
+	c, livenessID := newTestClientForIDScan(t, `{
+		"success": true,
+		"faceMatchLevel": 7,
+		"nfcVerified": true,
+		"documentData": {"documentType": "passport", "dateOfExpiry": "2000-01-01"}
+	}`)
+	tc := &tenant.Context{ID: "test-tenant", Policy: noRulesPolicy(t)}
+	ctx := tenant.WithStdContext(t.Context(), tc)
+
+	_, _, err := c.SubmitIDScan(ctx, livenessID, &facetec.IDScanRequest{})
+	require.Error(t, err)
+
+	var idvErr *idverrors.Error
+	require.True(t, errors.As(err, &idvErr))
+	assert.Equal(t, idverrors.CodeDocumentExpired, idvErr.Code)
 }

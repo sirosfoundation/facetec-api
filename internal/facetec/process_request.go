@@ -281,7 +281,32 @@ func parseFaceTecGroupedFields(m map[string]any) (DocumentData, bool, error) {
 		MRZLine3:       fields["mrzLine3"],
 		Portrait:       extractPortraitFromDG2(m),
 	}
+	dd.NFCRawData = extractNFCRawData(m)
 	return dd, true, nil
+}
+
+// extractNFCRawData returns documentData.nfcValues.rawData, the raw EF files
+// FaceTec read from the chip keyed by name ("SOD", "DG1", "DG2", ...) with
+// base64 values. Non-string values are dropped. Returns nil when NFC data is
+// absent. See https://dev.facetec.com/barcode-and-nfc-scanning#retrieving-nfc-cryptographic-signature
+// and the documentData example at
+// https://dev.facetec.com/technical-support-facetec-api-components-querying-ocr-barcode-nfc-data-from-documentdata
+func extractNFCRawData(documentData map[string]any) map[string]string {
+	nfcValues, ok := documentData["nfcValues"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	rawData, ok := nfcValues["rawData"].(map[string]any)
+	if !ok || len(rawData) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(rawData))
+	for k, v := range rawData {
+		if s, ok := v.(string); ok {
+			out[k] = s
+		}
+	}
+	return out
 }
 
 // extractPortraitFromDG2 extracts the face image embedded in the NFC chip's
@@ -357,6 +382,19 @@ func normalizeFaceTecDate(s string) string {
 
 	// Return as-is if we can't parse it; downstream will see the raw value.
 	return s
+}
+
+// DocumentExpired reports whether expiry, a YYYY-MM-DD date, is before today's
+// UTC date. The document stays valid on its expiry date. An empty or
+// unparseable value is not treated as expired.
+func DocumentExpired(expiry string, now time.Time) bool {
+	t, err := time.Parse("2006-01-02", strings.TrimSpace(expiry))
+	if err != nil {
+		return false
+	}
+	now = now.UTC()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	return today.After(t)
 }
 
 func normalizeSex(s string) string {

@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -181,6 +182,10 @@ func (c *Client) SubmitIDScan(ctx context.Context, livenessSessionID string, idS
 		return "", "", idverrors.New(idverrors.CodeNFCSkipped, "NFC verification was skipped or failed")
 	}
 
+	if err := c.rejectExpired(idScanResult.DocumentData); err != nil {
+		return "", "", err
+	}
+
 	if err := tc.Policy.EvaluateScan(scanResult); err != nil {
 		c.log.Debug("scan rejected by policy",
 			zap.String("tenant", tc.ID),
@@ -252,6 +257,33 @@ func (c *Client) ProcessRequest(ctx context.Context, req *facetec.ProcessRequest
 		return resp, nil
 	}
 
+	// Hard gate for passports: passive authentication of the chip files
+	// FaceTec returns (EF.SOD and data groups). The SOD signature must verify
+	// with its embedded document signer, DG1 and DG2 must be present and hash
+	// to the SOD, and the signer must chain to a CSCA in gmrtd's trust store
+	// for the passport's countryCode. FaceTec only checks the chip data
+	// against the signer on the same chip; it does not check that the signer
+	// is genuine.
+	if scanResult.IDScan.DocumentData.DocumentType == "passport" {
+		doc := scanResult.IDScan.DocumentData
+		if err := facetec.VerifyPassportChip(c.log, doc.NFCRawData, doc.IssuingCountry); err != nil {
+			c.log.Info("process-request scan rejected: passport chip failed passive authentication",
+				zap.String("tenant", tc.ID),
+				zap.String("doc_type", doc.DocumentType),
+				zap.Error(err),
+			)
+			resp.CredentialIssueError = "passport was not signed by a trusted certificate"
+			resp.CredentialIssueErrCode = string(idverrors.CodeSignerUntrusted)
+			return resp, nil
+		}
+	}
+
+	if err := c.rejectExpired(scanResult.IDScan.DocumentData); err != nil {
+		resp.CredentialIssueError = err.Message
+		resp.CredentialIssueErrCode = string(err.Code)
+		return resp, nil
+	}
+
 	if err := tc.Policy.EvaluateScan(*scanResult); err != nil {
 		c.log.Info("process-request scan rejected by policy",
 			zap.String("tenant", tc.ID),
@@ -282,6 +314,15 @@ func (c *Client) ProcessRequest(ctx context.Context, req *facetec.ProcessRequest
 	resp.TransactionID = docID
 	resp.CredentialOfferURL = offerURL
 	return resp, nil
+}
+
+// rejectExpired stops issuance when the document's expiry date is before today.
+func (c *Client) rejectExpired(doc facetec.DocumentData) *idverrors.Error {
+	if !facetec.DocumentExpired(doc.DateOfExpiry, time.Now()) {
+		return nil
+	}
+	c.log.Info("scan rejected: document expired", zap.String("doc_type", doc.DocumentType))
+	return idverrors.New(idverrors.CodeDocumentExpired, "document has expired")
 }
 
 // RedeemOffer retrieves and atomically removes a credential offer by transaction ID.

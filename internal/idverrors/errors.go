@@ -23,6 +23,13 @@ const (
 	// (FaceTec Server's nfcStatusEnumInt == NFC_REQUESTED_BUT_USER_PRESSED_SKIP),
 	// so the assurance level required for issuance was not met.
 	CodeNFCSkipped Code = "nfc_skipped"
+	// CodeSignerUntrusted indicates a passport's chip data failed passive
+	// authentication: EF.SOD is missing or malformed, a presented data group
+	// does not match the SOD, or the document signer does not chain to a CSCA
+	// trusted for the document's country.
+	CodeSignerUntrusted Code = "signer_untrusted"
+	// CodeDocumentExpired indicates the document's expiry date is before today.
+	CodeDocumentExpired Code = "document_expired"
 	// CodeIssuanceFailed indicates credential issuance failed after successful verification.
 	CodeIssuanceFailed Code = "issuance_failed"
 	// CodeInternalError indicates an unexpected internal error.

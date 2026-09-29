@@ -72,6 +72,8 @@ type DocumentData struct {
 	MRZLine1       string `json:"mrzLine1"`
 	MRZLine2       string `json:"mrzLine2"`
 	MRZLine3       string `json:"mrzLine3"`
+	// NFCRawData is documentData.nfcValues.rawData from the FaceTec Server response.
+	NFCRawData map[string]string `json:"-"`
 	// Portrait is the base64-encoded face photo cropped from the ID document.
 	// It is sourced exclusively from the FaceTec Server response and is never
 	// taken from client input.
