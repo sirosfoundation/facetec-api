@@ -52,10 +52,17 @@ const (
 	ReasonDG1Missing      = "dg1_missing"
 	ReasonMRZMismatch     = "mrz_mismatch"
 	ReasonUnknownIssuer   = "unknown_issuing_state"
+	ReasonSigningTime     = "signing_time_implausible"
 	ReasonPDPUnconfigured = "pdp_unconfigured"
 	ReasonPDPError        = "pdp_error"
 	ReasonPDPMalformed    = "pdp_malformed_response"
 	ReasonPDPDeniedPrefix = "pdp_denied:"
+
+	// signingTimeSkew tolerates clock drift when rejecting future SOD signing times.
+	signingTimeSkew = 10 * time.Minute
+	// maxDocumentValidity bounds how long before its expiry a document can have
+	// been signed (passports are valid for at most 10 years; margin included).
+	maxDocumentValidity = 11 * 365 * 24 * time.Hour
 
 	maxDataGroupBytes = 4 << 20
 	sodKey            = "SOD"
@@ -161,6 +168,9 @@ func Verify(raw map[string]string, claimed Claimed) *Result {
 	if err := crossCheckMRZ(dg1, claimed); err != nil {
 		return fail(ReasonMRZMismatch, "%v", err)
 	}
+	if err := plausibleSigningTime(signingTime, claimed.DateOfExpiry); err != nil {
+		return fail(ReasonSigningTime, "%v", err)
+	}
 
 	return &Result{
 		OK:           true,
@@ -178,6 +188,34 @@ func decodeDG(b64 string) ([]byte, error) {
 		return nil, errors.New("data group too large")
 	}
 	return base64.StdEncoding.DecodeString(b64)
+}
+
+// plausibleSigningTime bounds the signer-asserted CMS signingTime, which the
+// PDP uses as the certificate validation time. The attribute is covered by the
+// DSC's own signature, so a holder of an expired DSC key could backdate it into
+// the certificate's validity window; it therefore has to be consistent with
+// facts we already hold: not in the future (beyond a small clock skew), and,
+// relative to the DG1-bound expiry date, not after it and not more than
+// maxDocumentValidity before it. A nil signing time is fine (the PDP then
+// evaluates at the current time).
+func plausibleSigningTime(st *time.Time, expiryISO string) error {
+	if st == nil {
+		return nil
+	}
+	if st.After(now().Add(signingTimeSkew)) {
+		return errors.New("SOD signing time is in the future")
+	}
+	expiry, err := time.Parse("2006-01-02", expiryISO)
+	if err != nil {
+		return errors.New("cannot bound SOD signing time without a valid expiry date")
+	}
+	if st.After(expiry.Add(24 * time.Hour)) {
+		return errors.New("SOD signing time is after the document expiry")
+	}
+	if st.Before(expiry.Add(-maxDocumentValidity)) {
+		return errors.New("SOD signing time is implausibly long before the document expiry")
+	}
+	return nil
 }
 
 // verifySODSignature verifies the single SignerInfo of the SOD with the DSC

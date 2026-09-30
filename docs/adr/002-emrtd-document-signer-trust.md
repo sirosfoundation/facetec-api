@@ -27,7 +27,11 @@ Split the work across three roles (shared contract for the emrtd effort):
 The PEP calls `POST /evaluation` (AuthZEN) with subject `{key, <alpha-3>}`, resource
 `{x5c, <alpha-3>, [DSC, other SOD certs...]}`, action `emrtd-document-signer` and, when the SOD
 carries one, `context.signing_time`. Certificates from the SOD other than the DSC are untrusted
-intermediates, never anchors. Only `decision == true` **with** an anchor fingerprint
+intermediates, never anchors. The signer-asserted `signing_time` is signed by the DSC itself and so
+is attacker-controlled when a DSC key is expired or compromised; the PEP therefore only forwards it
+when it is not in the future (10 minute skew), not after the DG1-bound document expiry and not more
+than 11 years before it (`signing_time_implausible` otherwise). This bounds, but cannot eliminate,
+backdating: the PDP and the reviewed CSCA list remain the authority. Only `decision == true` **with** an anchor fingerprint
 (`csca_sha256`) counts as trusted; transport errors (one retry), timeouts, non-200, malformed
 bodies and denials all mean NOT trusted.
 

@@ -326,3 +326,29 @@ func TestVerify_DocumentTypeBoundToMRZCode(t *testing.T) {
 		}
 	}
 }
+
+func TestVerify_SigningTimePlausibility(t *testing.T) {
+	now = func() time.Time { return time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC) }
+	t.Cleanup(func() { now = time.Now })
+	cases := map[string]struct {
+		st time.Time
+		ok bool
+	}{
+		"issued years ago":   {time.Date(2022, 1, 5, 0, 0, 0, 0, time.UTC), true},
+		"just now":           {time.Date(2026, 9, 30, 11, 55, 0, 0, time.UTC), true},
+		"future":             {time.Date(2026, 10, 30, 0, 0, 0, 0, time.UTC), false},
+		"after expiry":       {time.Date(2031, 10, 5, 0, 0, 0, 0, time.UTC), false},
+		"decades before":     {time.Date(2005, 1, 1, 0, 0, 0, 0, time.UTC), false},
+		"just inside window": {time.Date(2020, 10, 10, 0, 0, 0, 0, time.UTC), true},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			c := emrtdtest.New(emrtdtest.Options{SigningTime: tc.st})
+			res := Verify(c.Raw, claimedFor(c))
+			assert.Equal(t, tc.ok, res.OK, res.Detail)
+			if !tc.ok {
+				assert.Equal(t, ReasonSigningTime, res.Reason)
+			}
+		})
+	}
+}
