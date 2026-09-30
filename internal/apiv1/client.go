@@ -188,8 +188,9 @@ func (c *Client) SubmitIDScan(ctx context.Context, livenessSessionID string, idS
 	}
 
 	// The legacy response carries no raw chip data, so chip-trusted is always
-	// false here (and trust.required rejects nothing it cannot see); policy
-	// rules that demand chip-trusted therefore reject this path.
+	// false here. Because NFCVerified (required above) counts as chip
+	// evidence, trust.required hard-rejects this path in assessChip; with
+	// trust.required off, policy rules that demand chip-trusted reject it.
 	if rej := c.assessChip(ctx, &scanResult); rej != nil {
 		c.log.Info("id-scan scan rejected: chip check",
 			zap.String("tenant", tc.ID), zap.String("reason", scanResult.IDScan.ChipTrustReason))
