@@ -26,6 +26,9 @@
 ; Default thresholds: liveness >= 80, face-match >= 06.
 ; To tighten or relax thresholds per deployment, edit these rules directly.
 
+; Note that Facetec itself has a configuration for minimum 3D:2D match level that will be used 
+; to trigger a warning about "manual review" in the device SDK. This is not covered by these rules.
+
 ; Accept passports with MRZ verification AND a chip whose document signer is trusted
 (facetec-scan (liveness-score (* range numeric ge 080)) (face-match-level (* range numeric ge 06)) (doc-type passport) (mrz-verified true) (nfc-verified (* set true false)) (barcode-verified (* set true false)) (chip-trusted true))
 ; Relaxed variant (NOT recommended; no CSCA validation of the chip). Only for
