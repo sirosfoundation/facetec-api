@@ -152,6 +152,7 @@ func ExtractScanResult(payload map[string]any) (*ScanResult, bool, error) {
 	// cropped/normalized, but don't clobber the NFC-derived portrait with an
 	// empty string when it's absent (confirmed absent in this deployment's
 	// FaceTec Server responses as of 2026-07-29).
+	chipPortrait := documentData.Portrait
 	if portrait, ok := lookupString(results["photoIDFaceCrop"]); ok {
 		documentData.Portrait = portrait
 	} else if portrait, ok := lookupString(payload["photoIDFaceCrop"]); ok {
@@ -173,6 +174,7 @@ func ExtractScanResult(payload map[string]any) (*ScanResult, bool, error) {
 			BarcodeVerified: barcodeStatus == 3,
 			ChipAuthStatus:  nfcAuthStatus,
 			ChipRaw:         extractNFCRawData(results["documentData"]),
+			ChipPortrait:    chipPortrait,
 		},
 	}, true, nil
 }

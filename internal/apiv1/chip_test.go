@@ -244,3 +244,25 @@ func TestProcessRequest_RequiredStatusWithoutChipDataRejected(t *testing.T) {
 	assert.Equal(t, string(idverrors.CodeChipUntrusted), resp.CredentialIssueErrCode,
 		"AUTHENTICATED status with no raw chip data must not dodge trust.required")
 }
+
+func TestAssessChip_TrustedPortraitBoundToDG2(t *testing.T) {
+	chip := emrtdtest.New(emrtdtest.Options{})
+	c := &Client{chip: emrtd.NewChecker(&fakeEvaluator{dec: emrtd.TrustDecision{Trusted: true, CSCASHA256: "cafe"}}, true)}
+	scan := &facetec.ScanResult{IDScan: facetec.IDScanResult{
+		ChipRaw:      chip.Raw,
+		ChipPortrait: "dg2-portrait",
+		DocumentData: facetec.DocumentData{
+			GivenName: chip.GivenName, FamilyName: chip.FamilyName, DocumentNumber: chip.DocumentNumber,
+			DateOfBirth: chip.DateOfBirth, DateOfExpiry: chip.DateOfExpiry, Nationality: "SWE", IssuingCountry: "SWE",
+			Portrait: "swapped-crop",
+		},
+	}}
+	require.Nil(t, c.assessChip(t.Context(), scan))
+	require.True(t, scan.IDScan.ChipTrusted)
+	assert.Equal(t, "dg2-portrait", scan.IDScan.DocumentData.Portrait)
+
+	scan.IDScan.ChipPortrait = ""
+	scan.IDScan.DocumentData.Portrait = "swapped-crop"
+	require.Nil(t, c.assessChip(t.Context(), scan))
+	assert.Empty(t, scan.IDScan.DocumentData.Portrait, "a portrait the SOD does not cover is not issued under a trusted chip")
+}

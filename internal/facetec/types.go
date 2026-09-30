@@ -77,6 +77,10 @@ type IDScanResult struct {
 	// "DG2", ...) for passive authentication. It is never serialised and never
 	// leaves this service.
 	ChipRaw map[string]string `json:"-"`
+	// ChipPortrait is the face image parsed from the chip's DG2 (base64),
+	// before any FaceTec-supplied crop could replace DocumentData.Portrait.
+	// It is what the SOD can vouch for once DG2's hash has been verified.
+	ChipPortrait string `json:"-"`
 }
 
 // DocumentData contains the OCR-extracted identity fields from the scanned document.

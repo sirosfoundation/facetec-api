@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -40,12 +41,12 @@ func TestPDP_AllowAndRequestShape(t *testing.T) {
 		assert.Equal(t, http.MethodPost, r.Method)
 		assert.Equal(t, "/evaluation", r.URL.Path)
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&got))
-		_, _ = w.Write([]byte(`{"decision":true,"context":{"reason":{"admin":{"csca_sha256":"ABCD","csca_subject":"C=SE, CN=CSCA","dsc_sha256":"EF01"}}}}`))
+		_, _ = w.Write([]byte(`{"decision":true,"context":{"reason":{"admin":{"csca_sha256":"ABABABABABABABABABABABABABABABABABABABABABABABABABABABABABABABAB","csca_subject":"C=SE, CN=CSCA","dsc_sha256":"EF01"}}}}`))
 	})
 	d, err := p.EvaluateDSC(t.Context(), sampleRequest())
 	require.NoError(t, err)
 	assert.True(t, d.Trusted)
-	assert.Equal(t, "abcd", d.CSCASHA256)
+	assert.Equal(t, strings.Repeat("ab", 32), d.CSCASHA256)
 	assert.Equal(t, "C=SE, CN=CSCA", d.CSCASubject)
 	assert.Equal(t, "ef01", d.DSCSHA256)
 	assert.EqualValues(t, 1, hits.Load())
@@ -220,3 +221,15 @@ func TestReasonMap_RawMessage(t *testing.T) {
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestPDP_AllowWithMalformedAnchorFingerprintIsMalformed(t *testing.T) {
+	for _, fp := range []string{"x", "abcd", "zz" + strings.Repeat("ab", 31), strings.Repeat("ab", 33)} {
+		var hits atomic.Int32
+		p := pdpServer(t, &hits, func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte(`{"decision":true,"context":{"reason":{"admin":{"csca_sha256":"` + fp + `"}}}}`))
+		})
+		d, err := p.EvaluateDSC(t.Context(), sampleRequest())
+		require.ErrorIs(t, err, ErrMalformedResponse, fp)
+		assert.False(t, d.Trusted)
+	}
+}

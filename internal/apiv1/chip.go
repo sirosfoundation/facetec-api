@@ -2,6 +2,7 @@ package apiv1
 
 import (
 	"context"
+	"slices"
 
 	"go.uber.org/zap"
 
@@ -61,6 +62,9 @@ func (c *Client) assessChip(ctx context.Context, scan *facetec.ScanResult) *idve
 	// Any sign of a chip read counts as presented, so an incomplete payload
 	// (status reported but SOD missing, stray raw fields) cannot dodge the gate.
 	presented := out.ChipPresented || id.ChipAuthStatus != 0 || len(id.ChipRaw) > 0
+	if out.Trusted {
+		bindPortraitToChip(id, out.Local.DataGroups)
+	}
 	if c.chip.Required() && presented && !out.Trusted {
 		return idverrors.Newf(idverrors.CodeChipUntrusted, "eMRTD chip is not trusted (%s)", out.Reason)
 	}
@@ -77,4 +81,16 @@ func chipAuditFields(id facetec.IDScanResult) []zap.Field {
 		zap.String("chip_dsc_sha256", id.ChipDSCSHA256),
 		zap.String("chip_csca_sha256", id.ChipCSCASHA256),
 	}
+}
+
+// bindPortraitToChip makes sure a chip-trusted scan only carries a portrait
+// the SOD vouches for. When DG2's hash was verified, the DG2 face image
+// replaces whatever FaceTec supplied (e.g. photoIDFaceCrop); when it was not,
+// the portrait is dropped rather than issued under a chip-trusted credential.
+func bindPortraitToChip(id *facetec.IDScanResult, verifiedDGs []int) {
+	if slices.Contains(verifiedDGs, 2) && id.ChipPortrait != "" {
+		id.DocumentData.Portrait = id.ChipPortrait
+		return
+	}
+	id.DocumentData.Portrait = ""
 }

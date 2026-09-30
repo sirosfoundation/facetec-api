@@ -399,10 +399,10 @@ func crossCheckMRZ(dg1 *document.DG1, c Claimed) error {
 	if !equalAlnum(m.DocumentNumber, c.DocumentNumber) {
 		return errors.New("document number differs between chip and scan")
 	}
-	if !sameMRZDate(m.DateOfBirth, c.DateOfBirth) {
+	if !sameMRZDate(m.DateOfBirth, c.DateOfBirth, true) {
 		return errors.New("date of birth differs between chip and scan")
 	}
-	if !sameMRZDate(m.DateOfExpiry, c.DateOfExpiry) {
+	if !sameMRZDate(m.DateOfExpiry, c.DateOfExpiry, false) {
 		return errors.New("date of expiry differs between chip and scan")
 	}
 	if err := crossCheckNames(m, c); err != nil {
@@ -458,13 +458,36 @@ func sameCountry(mrzCode, claimed string) bool {
 	return err == nil && want == got
 }
 
-// sameMRZDate compares an MRZ YYMMDD date with a YYYY-MM-DD claim. The century
-// is not encoded in the MRZ, so only YY is compared.
-func sameMRZDate(mrzDate, iso string) bool {
+// now is the clock used to resolve the MRZ century (overridable in tests).
+var now = time.Now
+
+// sameMRZDate compares an MRZ YYMMDD date with a YYYY-MM-DD claim. The MRZ
+// does not encode the century, so it is resolved explicitly (fail closed):
+// a date of birth is never in the future (the latest century that is not in the
+// future wins, so holders older than 100 are refused); an expiry date is
+// taken as 20YY, since no chip document expires in the 1900s.
+func sameMRZDate(mrzDate, iso string, birth bool) bool {
 	if len(mrzDate) != 6 || len(iso) != 10 || iso[4] != '-' || iso[7] != '-' {
 		return false
 	}
-	return mrzDate == iso[2:4]+iso[5:7]+iso[8:10]
+	if mrzDate[2:] != iso[5:7]+iso[8:10] || mrzDate[:2] != iso[2:4] {
+		return false
+	}
+	year, err := strconv.Atoi(iso[:4])
+	if err != nil {
+		return false
+	}
+	century := 2000
+	if birth {
+		t, err := time.Parse("2006-01-02", "20"+mrzDate[:2]+"-"+iso[5:7]+"-"+iso[8:10])
+		if err != nil {
+			return false
+		}
+		if t.After(now()) {
+			century = 1900
+		}
+	}
+	return year == century+int(mrzDate[0]-'0')*10+int(mrzDate[1]-'0')
 }
 
 func equalAlnum(a, b string) bool { return fold(a, true) == fold(b, true) && fold(a, true) != "" }

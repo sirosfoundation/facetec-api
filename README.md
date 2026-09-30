@@ -273,13 +273,13 @@ Rules are loaded at startup (and re-loaded on SIGHUP). If the rules directory is
 ; rules/default.spoc
 ; Accept passports with MRZ verification AND a chip whose document signer the
 ; go-trust PDP trusts (positional matching: earlier fields must be listed).
-(facetec-scan (doc-type passport) (mrz-verified true) (nfc-verified (* set true false)) (barcode-verified (* set true false)) (chip-trusted true))
+(facetec-scan (liveness-score (* range numeric ge 080)) (face-match-level (* range numeric ge 06)) (doc-type passport) (mrz-verified true) (nfc-verified (* set true false)) (barcode-verified (* set true false)) (chip-trusted true))
 
 ; Accept driving licences with barcode verification.
-(facetec-scan (doc-type dl) (mrz-verified false) (nfc-verified false) (barcode-verified true))
+(facetec-scan (liveness-score (* range numeric ge 080)) (face-match-level (* range numeric ge 06)) (doc-type dl) (mrz-verified false) (nfc-verified false) (barcode-verified true))
 
 ; Accept national ID cards (numeric thresholds from config still apply).
-(facetec-scan (doc-type id_card))
+(facetec-scan (liveness-score (* range numeric ge 080)) (face-match-level (* range numeric ge 06)) (doc-type id_card))
 ```
 
 Query fields available in every SPOCP query:

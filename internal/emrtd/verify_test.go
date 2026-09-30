@@ -260,11 +260,23 @@ func TestResolveClaimedCountry(t *testing.T) {
 }
 
 func TestSameMRZDate(t *testing.T) {
-	assert.True(t, sameMRZDate("850307", "1985-03-07"))
-	assert.False(t, sameMRZDate("850307", "1985-03-08"))
-	assert.False(t, sameMRZDate("85030", "1985-03-07"))
-	assert.False(t, sameMRZDate("850307", "19850307"))
-	assert.False(t, sameMRZDate("850307", "1985/03/07"))
+	now = func() time.Time { return time.Date(2026, 9, 30, 0, 0, 0, 0, time.UTC) }
+	t.Cleanup(func() { now = time.Now })
+	assert.True(t, sameMRZDate("850307", "1985-03-07", true))
+	assert.False(t, sameMRZDate("850307", "1985-03-08", true))
+	assert.False(t, sameMRZDate("85030", "1985-03-07", true))
+	assert.False(t, sameMRZDate("850307", "19850307", true))
+	assert.False(t, sameMRZDate("850307", "1985/03/07", true))
+	// Century: birth dates are never in the future, expiries are 20YY.
+	assert.True(t, sameMRZDate("100307", "2010-03-07", true))
+	assert.False(t, sameMRZDate("100307", "1910-03-07", true))
+	assert.False(t, sameMRZDate("300307", "2030-03-07", true), "future birth resolves to 1930")
+	assert.True(t, sameMRZDate("300307", "1930-03-07", true))
+	assert.True(t, sameMRZDate("310930", "2031-09-30", false))
+	assert.False(t, sameMRZDate("310930", "2131-09-30", false))
+	assert.False(t, sameMRZDate("310930", "1931-09-30", false))
+	assert.False(t, sameMRZDate("ab0307", "2010-03-07", true))
+	assert.False(t, sameMRZDate("100230", "2010-02-30", true), "invalid calendar date")
 }
 
 func TestDSCFingerprint_Empty(t *testing.T) {

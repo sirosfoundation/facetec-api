@@ -2,7 +2,9 @@ package emrtd
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -139,6 +141,9 @@ func decisionFrom(resp *authzen.EvaluationResponse) (TrustDecision, error) {
 	// indistinguishable from a PDP that is not running the emrtd registry.
 	if d.CSCASHA256 == "" {
 		return TrustDecision{}, fmt.Errorf("%w: allow without csca_sha256", ErrMalformedResponse)
+	}
+	if b, err := hex.DecodeString(d.CSCASHA256); err != nil || len(b) != sha256.Size {
+		return TrustDecision{}, fmt.Errorf("%w: csca_sha256 is not a SHA-256 hex digest", ErrMalformedResponse)
 	}
 	d.Trusted = true
 	return d, nil
