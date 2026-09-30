@@ -35,6 +35,7 @@ import (
 	"github.com/gmrtd/gmrtd/cms"
 	"github.com/gmrtd/gmrtd/document"
 	"github.com/gmrtd/gmrtd/iso3166"
+	"github.com/gmrtd/gmrtd/mrz"
 	"github.com/gmrtd/gmrtd/oid"
 )
 
@@ -403,19 +404,28 @@ func crossCheckMRZ(dg1 *document.DG1, c Claimed) error {
 	if !sameMRZDate(m.DateOfExpiry, c.DateOfExpiry) {
 		return errors.New("date of expiry differs between chip and scan")
 	}
-	if m.NameOfHolder != nil {
-		if c.FamilyName != "" && !equalAlpha(m.NameOfHolder.Primary, c.FamilyName) {
-			return errors.New("family name differs between chip and scan")
-		}
-		if c.GivenName != "" && !equalAlpha(m.NameOfHolder.Secondary, c.GivenName) {
-			return errors.New("given name differs between chip and scan")
-		}
+	if err := crossCheckNames(m, c); err != nil {
+		return err
 	}
 	if c.Nationality != "" && !sameCountry(m.Nationality, c.Nationality) {
 		return errors.New("nationality differs between chip and scan")
 	}
 	if c.IssuingCountry != "" && !sameCountry(m.IssuingState, c.IssuingCountry) {
 		return errors.New("issuing state differs between chip and scan")
+	}
+	return nil
+}
+
+// crossCheckNames compares the holder name fields the claim carries.
+func crossCheckNames(m *mrz.MRZ, c Claimed) error {
+	if m.NameOfHolder == nil {
+		return nil
+	}
+	if c.FamilyName != "" && !equalAlpha(m.NameOfHolder.Primary, c.FamilyName) {
+		return errors.New("family name differs between chip and scan")
+	}
+	if c.GivenName != "" && !equalAlpha(m.NameOfHolder.Secondary, c.GivenName) {
+		return errors.New("given name differs between chip and scan")
 	}
 	return nil
 }
