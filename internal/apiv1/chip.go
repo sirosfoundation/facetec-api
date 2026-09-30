@@ -30,7 +30,7 @@ func newChipChecker(cfg config.TrustConfig) *emrtd.Checker {
 //
 //   - FaceTec reported a failed chip authentication (status 3 or 5), or
 //   - trust.required is set and chip evidence (a non-zero chip auth status or
-//     any raw chip data) was presented but is not trusted.
+//     any raw chip data or FaceTec NFC verification) was presented but is not trusted.
 //
 // Status 1 (NOT_SUPPORTED_BY_DOCUMENT: no AA/CA on the chip) is permitted: it
 // is a weaker clone-detection signal and is surfaced in the audit log through
@@ -53,6 +53,7 @@ func (c *Client) assessChip(ctx context.Context, scan *facetec.ScanResult) *idve
 		Nationality:    dd.Nationality,
 		IssuingCountry: dd.IssuingCountry,
 		Sex:            dd.Sex,
+		DocumentType:   dd.DocumentType,
 	})
 	id.ChipTrusted = out.Trusted
 	id.ChipTrustReason = out.Reason
@@ -61,7 +62,7 @@ func (c *Client) assessChip(ctx context.Context, scan *facetec.ScanResult) *idve
 
 	// Any sign of a chip read counts as presented, so an incomplete payload
 	// (status reported but SOD missing, stray raw fields) cannot dodge the gate.
-	presented := out.ChipPresented || id.ChipAuthStatus != 0 || len(id.ChipRaw) > 0
+	presented := out.ChipPresented || id.ChipAuthStatus != 0 || len(id.ChipRaw) > 0 || id.NFCVerified
 	if out.Trusted {
 		bindPortraitToChip(id, out.Local.DataGroups)
 	}

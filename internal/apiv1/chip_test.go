@@ -200,7 +200,7 @@ func TestSubmitIDScan_LegacyPathNeverChipTrusted(t *testing.T) {
 	_, _, err := c.SubmitIDScan(tenant.WithStdContext(t.Context(), tc), livenessID, &facetec.IDScanRequest{})
 	var idvErr *idverrors.Error
 	require.True(t, errors.As(err, &idvErr))
-	assert.Equal(t, idverrors.CodePolicyRejected, idvErr.Code)
+	assert.Equal(t, idverrors.CodeChipUntrusted, idvErr.Code, "NFC verified by FaceTec alone is chip evidence")
 }
 
 func TestNewChipChecker(t *testing.T) {
@@ -265,4 +265,12 @@ func TestAssessChip_TrustedPortraitBoundToDG2(t *testing.T) {
 	scan.IDScan.DocumentData.Portrait = "swapped-crop"
 	require.Nil(t, c.assessChip(t.Context(), scan))
 	assert.Empty(t, scan.IDScan.DocumentData.Portrait, "a portrait the SOD does not cover is not issued under a trusted chip")
+}
+
+func TestAssessChip_RequiredRejectsMalformedRawData(t *testing.T) {
+	c := &Client{chip: emrtd.NewChecker(&fakeEvaluator{}, true)}
+	scan := &facetec.ScanResult{IDScan: facetec.IDScanResult{ChipRaw: map[string]string{"SOD": ""}}}
+	err := c.assessChip(t.Context(), scan)
+	require.NotNil(t, err)
+	assert.Equal(t, idverrors.CodeChipUntrusted, err.Code)
 }

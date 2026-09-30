@@ -61,9 +61,9 @@ func TestExtractNFCRawData(t *testing.T) {
 	dd := map[string]any{"nfcValues": map[string]any{"rawData": map[string]any{
 		"SOD": "c29k", "DG1": "ZGcx", "DG2": "", "junk": 7.0,
 	}}}
-	want := map[string]string{"SOD": "c29k", "DG1": "ZGcx"}
+	want := map[string]string{"SOD": "c29k", "DG1": "ZGcx", "DG2": "", "junk": ""}
 	got := extractNFCRawData(dd)
-	if len(got) != len(want) || got["SOD"] != "c29k" || got["DG1"] != "ZGcx" {
+	if len(got) != len(want) || got["junk"] != "" || got["SOD"] != "c29k" || got["DG1"] != "ZGcx" {
 		t.Errorf("map form: got %v, want %v", got, want)
 	}
 	got = extractNFCRawData(`{"nfcValues":{"rawData":{"SOD":"c29k"}}}`)

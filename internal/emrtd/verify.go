@@ -75,6 +75,7 @@ type Claimed struct {
 	Nationality    string
 	IssuingCountry string
 	Sex            string // M/F/X (or MALE/FEMALE)
+	DocumentType   string // passport, id_card, dl (empty: not checked)
 }
 
 // Result is the outcome of local passive authentication.
@@ -408,6 +409,9 @@ func crossCheckMRZ(dg1 *document.DG1, c Claimed) error {
 	if err := crossCheckNames(m, c); err != nil {
 		return err
 	}
+	if err := crossCheckDocumentType(m, c.DocumentType); err != nil {
+		return err
+	}
 	if c.Sex != "" && normalizeSex(m.Sex) != normalizeSex(c.Sex) {
 		return errors.New("sex differs between chip and scan")
 	}
@@ -416,6 +420,24 @@ func crossCheckMRZ(dg1 *document.DG1, c Claimed) error {
 	}
 	if c.IssuingCountry != "" && !sameCountry(m.IssuingState, c.IssuingCountry) {
 		return errors.New("issuing state differs between chip and scan")
+	}
+	return nil
+}
+
+// crossCheckDocumentType binds the document type the policy will see to the
+// signed MRZ document code (ICAO 9303: P = passport, I/A/C = identity card).
+// Other claimed types (e.g. dl) are not eMRTDs and are not checked.
+func crossCheckDocumentType(m *mrz.MRZ, claimed string) error {
+	code := strings.ToUpper(strings.TrimSpace(m.DocumentCode))
+	switch claimed {
+	case "passport":
+		if !strings.HasPrefix(code, "P") {
+			return errors.New("document type differs between chip and scan")
+		}
+	case "id_card":
+		if code == "" || !strings.ContainsAny(code[:1], "IAC") {
+			return errors.New("document type differs between chip and scan")
+		}
 	}
 	return nil
 }

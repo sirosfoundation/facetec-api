@@ -317,8 +317,9 @@ func ChipAuthStatusFailed(status int) bool {
 }
 
 // extractNFCRawData returns documentData.nfcValues.rawData as a string map
-// (base64 values), or nil when absent. Non-string values are dropped, which
-// can only make verification fail, never pass.
+// (base64 values), or nil when absent. Non-string or empty values are kept as
+// empty strings, which can only make verification fail, never pass, while
+// still counting as chip evidence.
 func extractNFCRawData(value any) map[string]string {
 	var dd map[string]any
 	switch typed := value.(type) {
@@ -338,9 +339,10 @@ func extractNFCRawData(value any) map[string]string {
 	}
 	out := make(map[string]string, len(rawData))
 	for k, v := range rawData {
-		if s, ok := v.(string); ok && s != "" {
-			out[k] = s
-		}
+		// Keep the key even when the value is unusable: its presence is
+		// evidence that a chip was read, and verification then fails closed.
+		s, _ := v.(string)
+		out[k] = s
 	}
 	return out
 }

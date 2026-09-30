@@ -166,11 +166,10 @@ func TestVerify_DG1Missing(t *testing.T) {
 
 func TestVerify_DG1Unparsable(t *testing.T) {
 	// A DG1 that is covered by the SOD (hash ok) but is not a valid MRZ.
-	c := emrtdtest.New(emrtdtest.Options{})
-	c.Raw["DG1"] = base64.StdEncoding.EncodeToString([]byte{0x61, 0x02, 0x01, 0x02})
+	c := emrtdtest.New(emrtdtest.Options{MalformedDG1: true})
 	res := Verify(c.Raw, claimedFor(c))
 	assert.False(t, res.OK)
-	assert.Contains(t, []string{ReasonDGHashMismatch, ReasonDGMalformed}, res.Reason)
+	assert.Equal(t, ReasonDGMalformed, res.Reason)
 }
 
 func TestVerify_UnknownIssuingState(t *testing.T) {
@@ -297,4 +296,31 @@ func TestNormalizeSex(t *testing.T) {
 	assert.Equal(t, "F", normalizeSex("F"))
 	assert.Equal(t, "X", normalizeSex("<"))
 	assert.Equal(t, "X", normalizeSex("X"))
+}
+
+func TestVerify_DocumentTypeBoundToMRZCode(t *testing.T) {
+	cases := []struct {
+		code, claimed string
+		ok            bool
+	}{
+		{"P<", "passport", true},
+		{"PD", "passport", true},
+		{"I<", "passport", false},
+		{"P<", "id_card", false},
+		{"I<", "id_card", true},
+		{"A<", "id_card", true},
+		{"C<", "id_card", true},
+		{"P<", "dl", true},
+		{"P<", "", true},
+	}
+	for _, tc := range cases {
+		c := emrtdtest.New(emrtdtest.Options{DocumentCode: tc.code})
+		cl := claimedFor(c)
+		cl.DocumentType = tc.claimed
+		res := Verify(c.Raw, cl)
+		assert.Equal(t, tc.ok, res.OK, "%s vs %s", tc.code, tc.claimed)
+		if !tc.ok {
+			assert.Equal(t, ReasonMRZMismatch, res.Reason)
+		}
+	}
 }

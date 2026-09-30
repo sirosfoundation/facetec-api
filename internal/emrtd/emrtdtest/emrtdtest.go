@@ -43,6 +43,11 @@ type Options struct {
 	ExtraCert bool
 	// OmitDG1 leaves DG1 out of the SOD hash list (and the chip data).
 	OmitDG1 bool
+	// MalformedDG1 makes DG1 an unparsable structure that the SOD nevertheless
+	// covers (hash and signature are valid).
+	MalformedDG1 bool
+	// DocumentCode is the two-character MRZ document code. Default "P<".
+	DocumentCode string
 	// TwoSigners emits two SignerInfos.
 	TwoSigners bool
 }
@@ -158,6 +163,9 @@ func New(o Options) *Chip {
 
 	mrz := buildTD3(o, c)
 	dg1 := tlv(0x61, append([]byte{0x5F, 0x1F, byte(len(mrz))}, []byte(mrz)...))
+	if o.MalformedDG1 {
+		dg1 = []byte{0x61, 0x02, 0x01, 0x02}
+	}
 	dg2 := append([]byte{0x75, 0x10}, []byte("fake-face-image!")...)
 
 	hashes := [][]byte{seq(der(2), der(hash(dg2)))}
@@ -247,7 +255,11 @@ func buildTD3(o Options, c *Chip) string {
 	if issuing == "D" {
 		issuing = "D<<"
 	}
-	l1 := "P<" + pad(issuing, 3) + pad(name, 39)
+	code := o.DocumentCode
+	if code == "" {
+		code = "P<"
+	}
+	l1 := code + pad(issuing, 3) + pad(name, 39)
 	doc := pad(c.DocumentNumber, 9)
 	dob, exp := yymmdd(c.DateOfBirth), yymmdd(c.DateOfExpiry)
 	opt := pad("", 14)
