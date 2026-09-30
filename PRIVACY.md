@@ -152,7 +152,18 @@ The VC issuer receives the stripped DocumentData (no MRZ, no biometric data). It
 **processor** or **joint controller** depending on the deployment architecture. A DPA or
 inter-controller agreement is required.
 
-### 5.3 No other sub-processors
+### 5.3 go-trust PDP (eMRTD document-signer trust)
+
+For passports read over NFC, facetec-api asks a go-trust PDP (`trust.pdp_url`, operated by the
+same organisation) whether the chip's Document Signer Certificate chains to a reviewed CSCA. The
+request carries **only X.509 certificates (public data, identical for every passport signed by
+that DSC) and an ISO 3166-1 alpha-3 country code, plus optionally the SOD signing time**. No
+personal data, no SOD, no data groups, no MRZ and no biometric data are sent. The PDP is therefore
+not a processor of personal data. The chip data itself (SOD, DG1, DG2) is processed in memory
+only, exactly like the rest of the scan, and only the outcome (`chip_trusted`, a reason code and
+certificate fingerprints) is written to the audit log.
+
+### 5.4 No other sub-processors
 
 `facetec-api` does not use:
 - Any cloud storage, database, or message queue.

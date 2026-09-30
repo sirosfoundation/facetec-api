@@ -77,6 +77,9 @@ by environment variables. The full annotated reference is [configs/config.yaml](
 | `issuer.issuing_authority` | `ISSUER_ISSUING_AUTHORITY` | `issuer.authentic_source` | Photo ID `issuing_authority_unicode` (`mdoc` only) |
 | `issuer.issuing_country` | `ISSUER_ISSUING_COUNTRY` | scanned document's country | Photo ID `issuing_country`, ISO 3166-1 alpha-2 (`mdoc` only) |
 | `policy.rules_dir` | `POLICY_RULES_DIR` | *(empty)* | Directory of `.spoc` rule files |
+| `trust.pdp_url` | `TRUST_PDP_URL` | *(empty)* | Base URL of the go-trust AuthZEN PDP that decides whether an eMRTD document signer chains to a reviewed CSCA (`POST {url}/evaluation`). Empty = unconfigured: chips are verified locally but never reported as trusted |
+| `trust.timeout` | `TRUST_TIMEOUT` | `5s` | Timeout of each PDP request attempt (one retry, transport errors only) |
+| `trust.required` | `TRUST_REQUIRED` | `true` | Fail closed: refuse to start without `trust.pdp_url`, and hard-reject any scan that presented chip data which is not trusted, independent of the SPOCP rules. Set `false` only for development or when no rule depends on `chip-trusted` |
 | `session.liveness_ttl` | `SESSION_LIVENESS_TTL` | `2m` | How long a FaceMap is held in memory |
 | `session.offer_ttl` | `SESSION_OFFER_TTL` | `5m` | How long a credential offer is held in memory |
 | `logging.level` | `LOG_LEVEL` | `info` | Log level: `debug`, `info`, `warn`, `error` |
@@ -268,11 +271,9 @@ Rules are loaded at startup (and re-loaded on SIGHUP). If the rules directory is
 
 ```scheme
 ; rules/default.spoc
-; Accept passports with MRZ verification.
-(facetec-scan (doc-type passport) (mrz-verified true))
-
-; Accept e-passports with NFC chip verification.
-(facetec-scan (doc-type passport) (mrz-verified true) (nfc-verified true))
+; Accept passports with MRZ verification AND a chip whose document signer the
+; go-trust PDP trusts (positional matching: earlier fields must be listed).
+(facetec-scan (doc-type passport) (mrz-verified true) (nfc-verified (* set true false)) (barcode-verified (* set true false)) (chip-trusted true))
 
 ; Accept driving licences with barcode verification.
 (facetec-scan (doc-type dl) (mrz-verified false) (nfc-verified false) (barcode-verified true))
@@ -289,6 +290,22 @@ Query fields available in every SPOCP query:
 | `mrz-verified` | `true`, `false` |
 | `nfc-verified` | `true`, `false` |
 | `barcode-verified` | `true`, `false` |
+| `chip-trusted` | `true`, `false` |
+
+Field order in the query is: `liveness-score`, `face-match-level`, `doc-type`, `mrz-verified`,
+`nfc-verified`, `barcode-verified`, `chip-trusted`. Matching is positional, so a rule that
+constrains `chip-trusted` must list the fields before it (`(* set true false)` matches either value).
+
+`nfc-verified` only reflects FaceTec's own chip check (SOD hashes against the DSC embedded in the
+same chip, plus clone detection) and proves integrity, not authenticity. `chip-trusted` is `true`
+only when facetec-api itself verified the SOD signature, every data-group hash and the DG1/MRZ
+cross-check, **and** the go-trust PDP trusts the DSC for the issuing state
+(see [ADR-002](docs/adr/002-emrtd-document-signer-trust.md)).
+
+FaceTec `nfcAuthenticationStatusEnumInt` 3 (`FAILED`) and 5 (`FAILED_DUE_TO_SIGNATURE_VERIFICATION`)
+are rejected in code regardless of the rules. Status 1 (`NOT_SUPPORTED_BY_DOCUMENT`: no Active or
+Chip Authentication on the chip) is permitted but is a weaker clone-detection signal; it is
+recorded as `chip_auth_status` in the audit records.
 
 ## ETSI 119 461 §4.5 Compliance
 
