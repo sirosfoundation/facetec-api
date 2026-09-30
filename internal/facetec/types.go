@@ -55,6 +55,28 @@ type IDScanResult struct {
 	// ever set by ExtractScanResult (the /process-request path); always
 	// false for the legacy /match-3d-3d JSON-decoded path.
 	NFCSkipped bool `json:"nfcSkipped"`
+
+	// ChipAuthStatus is FaceTec's nfcAuthenticationStatusEnumInt: 0 N/A,
+	// 1 NOT_SUPPORTED_BY_DOCUMENT (no AA/CA on the chip: permitted but a
+	// weaker clone-detection signal), 2 NOT_SUPPORTED_BY_SDK, 3 FAILED,
+	// 4 AUTHENTICATED, 5 FAILED_DUE_TO_SIGNATURE_VERIFICATION. 3 and 5 are a
+	// hard reject. Only set by ExtractScanResult.
+	ChipAuthStatus int `json:"chipAuthStatus"`
+	// ChipTrusted is true only when facetec-api itself verified the SOD and
+	// data-group hashes AND the go-trust PDP trusts the DSC for the issuing
+	// state. FaceTec's own checks never contribute to it. Set by the caller
+	// (see apiv1), never by ExtractScanResult.
+	ChipTrusted bool `json:"chipTrusted"`
+	// ChipTrustReason is a machine-readable reason code ("ok" when trusted).
+	ChipTrustReason string `json:"chipTrustReason,omitempty"`
+	// ChipDSCSHA256 and ChipCSCASHA256 are hex fingerprints of the document
+	// signer and anchor certificates, kept for the audit record.
+	ChipDSCSHA256  string `json:"chipDscSha256,omitempty"`
+	ChipCSCASHA256 string `json:"chipCscaSha256,omitempty"`
+	// ChipRaw holds documentData.nfcValues.rawData (base64 "SOD", "DG1",
+	// "DG2", ...) for passive authentication. It is never serialised and never
+	// leaves this service.
+	ChipRaw map[string]string `json:"-"`
 }
 
 // DocumentData contains the OCR-extracted identity fields from the scanned document.

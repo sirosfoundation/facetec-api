@@ -115,9 +115,22 @@ func ExtractScanResult(payload map[string]any) (*ScanResult, bool, error) {
 	//   mrzStatusEnumInt:               2 = SUCCESS
 	//   nfcAuthenticationStatusEnumInt: 4 = AUTHENTICATED
 	//   barcodeStatusEnumInt:           3 = SUCCESS
-	mrzStatus, _, _ := lookupInt(results["mrzStatusEnumInt"])
-	nfcAuthStatus, _, _ := lookupInt(results["nfcAuthenticationStatusEnumInt"])
-	barcodeStatus, _, _ := lookupInt(results["barcodeStatusEnumInt"])
+	//
+	// A present-but-wrongly-typed value is an error (fail closed): silently
+	// reading it as 0 would turn e.g. a FAILED (3) chip authentication into
+	// "not applicable".
+	mrzStatus, _, err := lookupInt(results["mrzStatusEnumInt"])
+	if err != nil {
+		return nil, false, fmt.Errorf("facetec: mrzStatusEnumInt: %w", err)
+	}
+	nfcAuthStatus, _, err := lookupInt(results["nfcAuthenticationStatusEnumInt"])
+	if err != nil {
+		return nil, false, fmt.Errorf("facetec: nfcAuthenticationStatusEnumInt: %w", err)
+	}
+	barcodeStatus, _, err := lookupInt(results["barcodeStatusEnumInt"])
+	if err != nil {
+		return nil, false, fmt.Errorf("facetec: barcodeStatusEnumInt: %w", err)
+	}
 
 	// nfcStatusEnumInt directly drives the NFCSkipped hard issuance gate
 	// (see nfcStatusUserSkipped below), unlike the other status enums above,
@@ -158,6 +171,8 @@ func ExtractScanResult(payload map[string]any) (*ScanResult, bool, error) {
 			NFCVerified:     nfcAuthStatus == 4,
 			NFCSkipped:      nfcStatus == nfcStatusUserSkipped,
 			BarcodeVerified: barcodeStatus == 3,
+			ChipAuthStatus:  nfcAuthStatus,
+			ChipRaw:         extractNFCRawData(results["documentData"]),
 		},
 	}, true, nil
 }
@@ -282,6 +297,50 @@ func parseFaceTecGroupedFields(m map[string]any) (DocumentData, bool, error) {
 		Portrait:       extractPortraitFromDG2(m),
 	}
 	return dd, true, nil
+}
+
+// NFC chip authentication status values (nfcAuthenticationStatusEnumInt) that
+// mean the chip failed clone detection or signature verification.
+const (
+	// ChipAuthFailed is NFC_AUTHENTICATION_FAILED.
+	ChipAuthFailed = 3
+	// ChipAuthFailedSignature is NFC_AUTHENTICATION_FAILED_DUE_TO_SIGNATURE_VERIFICATION.
+	ChipAuthFailedSignature = 5
+)
+
+// ChipAuthStatusFailed reports whether a nfcAuthenticationStatusEnumInt value
+// is one of the failure states, which is a hard reject.
+func ChipAuthStatusFailed(status int) bool {
+	return status == ChipAuthFailed || status == ChipAuthFailedSignature
+}
+
+// extractNFCRawData returns documentData.nfcValues.rawData as a string map
+// (base64 values), or nil when absent. Non-string values are dropped, which
+// can only make verification fail, never pass.
+func extractNFCRawData(value any) map[string]string {
+	var dd map[string]any
+	switch typed := value.(type) {
+	case map[string]any:
+		dd = typed
+	case string:
+		if err := json.Unmarshal([]byte(typed), &dd); err != nil {
+			return nil
+		}
+	default:
+		return nil
+	}
+	nfcValues, _ := dd["nfcValues"].(map[string]any)
+	rawData, _ := nfcValues["rawData"].(map[string]any)
+	if len(rawData) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(rawData))
+	for k, v := range rawData {
+		if s, ok := v.(string); ok && s != "" {
+			out[k] = s
+		}
+	}
+	return out
 }
 
 // extractPortraitFromDG2 extracts the face image embedded in the NFC chip's

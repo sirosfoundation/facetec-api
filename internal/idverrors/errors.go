@@ -23,6 +23,14 @@ const (
 	// (FaceTec Server's nfcStatusEnumInt == NFC_REQUESTED_BUT_USER_PRESSED_SKIP),
 	// so the assurance level required for issuance was not met.
 	CodeNFCSkipped Code = "nfc_skipped"
+	// CodeChipAuthFailed indicates FaceTec reported a failed chip
+	// authentication (nfcAuthenticationStatusEnumInt 3 or 5): the chip looks
+	// cloned or its signature did not verify.
+	CodeChipAuthFailed Code = "chip_auth_failed"
+	// CodeChipUntrusted indicates the eMRTD chip data could not be verified
+	// against a trusted document signer and the deployment requires that
+	// (trust.required).
+	CodeChipUntrusted Code = "chip_untrusted"
 	// CodeIssuanceFailed indicates credential issuance failed after successful verification.
 	CodeIssuanceFailed Code = "issuance_failed"
 	// CodeInternalError indicates an unexpected internal error.
