@@ -200,53 +200,10 @@ func verifySODSignature(sod *document.SOD) (dsc []byte, extras [][]byte, signing
 		return nil, nil, nil, err
 	}
 
-	// CMS authenticated attributes (RFC 5652 5.4): contentType and
-	// messageDigest are mandatory and bind the signature to eContent.
-	if len(si.AuthenticatedAttributes) == 0 {
-		return nil, nil, nil, errors.New("SignerInfo without authenticated attributes is not supported")
+	if err := verifySignerInfo(sd, si, signer); err != nil {
+		return nil, nil, nil, err
 	}
-	aaType := si.AuthenticatedAttributes.ByOID(oid.OidContentType)
-	aaDigest := si.AuthenticatedAttributes.ByOID(oid.OidMessageDigest)
-	if aaType == nil || aaDigest == nil {
-		return nil, nil, nil, errors.New("missing contentType/messageDigest authenticated attribute")
-	}
-	var aaTypeOID asn1.ObjectIdentifier
-	if rest, err := asn1.Unmarshal(aaType.Values.Bytes, &aaTypeOID); err != nil || len(rest) != 0 {
-		return nil, nil, nil, errors.New("malformed contentType attribute")
-	}
-	if !aaTypeOID.Equal(sd.Content.EContentType) {
-		return nil, nil, nil, errors.New("contentType attribute differs from eContentType")
-	}
-	var aaDigestBytes []byte
-	if rest, err := asn1.Unmarshal(aaDigest.Values.Bytes, &aaDigestBytes); err != nil || len(rest) != 0 {
-		return nil, nil, nil, errors.New("malformed messageDigest attribute")
-	}
-	hasher := cms.DefaultCryptoHasher{}
-	contentHash, err := hasher.CryptoHashByOid(si.DigestAlgorithm.Algorithm, sd.Content.EContent)
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("hash eContent: %w", err)
-	}
-	if !bytes.Equal(contentHash, aaDigestBytes) {
-		return nil, nil, nil, errors.New("messageDigest does not match eContent")
-	}
-
-	signed := si.AuthenticatedAttributes.SetOfAsnBytes()
-	digest, err := hasher.CryptoHashByOid(si.DigestAlgorithm.Algorithm, signed)
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("hash signed attributes: %w", err)
-	}
-	if err := cms.VerifySignature(signer.TbsCertificate.SubjectPublicKeyInfo.FullBytes,
-		si.DigestAlgorithm.Algorithm, digest, si.DigestEncryptionAlgorithm.Algorithm, si.EncryptedDigest); err != nil {
-		return nil, nil, nil, fmt.Errorf("SOD signature does not verify with the embedded DSC: %w", err)
-	}
-
-	if a := si.AuthenticatedAttributes.ByOID(oid.OidSigningTime); a != nil {
-		var st time.Time
-		if rest, err := asn1.Unmarshal(a.Values.Bytes, &st); err == nil && len(rest) == 0 {
-			st = st.UTC()
-			signingTime = &st
-		}
-	}
+	signingTime = signingTimeOf(si)
 
 	dsc = bytes.Clone(signer.Raw)
 	for i := range all {
@@ -255,6 +212,64 @@ func verifySODSignature(sod *document.SOD) (dsc []byte, extras [][]byte, signing
 		}
 	}
 	return dsc, extras, signingTime, nil
+}
+
+// verifySignerInfo checks the CMS authenticated attributes (RFC 5652 5.4):
+// contentType and messageDigest are mandatory and bind the signature to
+// eContent; then it verifies the signature over them with the signer's key.
+func verifySignerInfo(sd *cms.SignedData, si *cms.SignerInfo, signer *cms.Certificate) error {
+	if len(si.AuthenticatedAttributes) == 0 {
+		return errors.New("SignerInfo without authenticated attributes is not supported")
+	}
+	aaType := si.AuthenticatedAttributes.ByOID(oid.OidContentType)
+	aaDigest := si.AuthenticatedAttributes.ByOID(oid.OidMessageDigest)
+	if aaType == nil || aaDigest == nil {
+		return errors.New("missing contentType/messageDigest authenticated attribute")
+	}
+	var aaTypeOID asn1.ObjectIdentifier
+	if rest, err := asn1.Unmarshal(aaType.Values.Bytes, &aaTypeOID); err != nil || len(rest) != 0 {
+		return errors.New("malformed contentType attribute")
+	}
+	if !aaTypeOID.Equal(sd.Content.EContentType) {
+		return errors.New("contentType attribute differs from eContentType")
+	}
+	var aaDigestBytes []byte
+	if rest, err := asn1.Unmarshal(aaDigest.Values.Bytes, &aaDigestBytes); err != nil || len(rest) != 0 {
+		return errors.New("malformed messageDigest attribute")
+	}
+	hasher := cms.DefaultCryptoHasher{}
+	contentHash, err := hasher.CryptoHashByOid(si.DigestAlgorithm.Algorithm, sd.Content.EContent)
+	if err != nil {
+		return fmt.Errorf("hash eContent: %w", err)
+	}
+	if !bytes.Equal(contentHash, aaDigestBytes) {
+		return errors.New("messageDigest does not match eContent")
+	}
+
+	signed := si.AuthenticatedAttributes.SetOfAsnBytes()
+	digest, err := hasher.CryptoHashByOid(si.DigestAlgorithm.Algorithm, signed)
+	if err != nil {
+		return fmt.Errorf("hash signed attributes: %w", err)
+	}
+	if err := cms.VerifySignature(signer.TbsCertificate.SubjectPublicKeyInfo.FullBytes,
+		si.DigestAlgorithm.Algorithm, digest, si.DigestEncryptionAlgorithm.Algorithm, si.EncryptedDigest); err != nil {
+		return fmt.Errorf("SOD signature does not verify with the embedded DSC: %w", err)
+	}
+	return nil
+}
+
+// signingTimeOf returns the optional CMS signingTime attribute, or nil.
+func signingTimeOf(si *cms.SignerInfo) *time.Time {
+	a := si.AuthenticatedAttributes.ByOID(oid.OidSigningTime)
+	if a == nil {
+		return nil
+	}
+	var st time.Time
+	if rest, err := asn1.Unmarshal(a.Values.Bytes, &st); err != nil || len(rest) != 0 {
+		return nil
+	}
+	st = st.UTC()
+	return &st
 }
 
 // selectSigner picks the embedded certificate named by the SignerIdentifier.
@@ -285,13 +300,8 @@ func selectSigner(pool *cms.GenericCertPool, all []cms.Certificate, si *cms.Sign
 	return nil, fmt.Errorf("signer identifier matched %d of %d embedded certificates", len(matches), len(all))
 }
 
-// verifyDataGroups checks every presented DGn against the SOD hash list. A
-// presented data group that the SOD does not cover is rejected (data
-// injection), as is any hash mismatch.
-func verifyDataGroups(sod *document.SOD, raw map[string]string) (verified []int, reason string, err error) {
-	hasher := cms.DefaultCryptoHasher{}
-	alg := sod.LdsSecurityObject.HashAlgorithm.Algorithm
-
+// presentedDGNumbers returns the sorted numbers of the DGn keys in raw.
+func presentedDGNumbers(raw map[string]string) []int {
 	var nums []int
 	for k := range raw {
 		if k == sodKey {
@@ -304,11 +314,21 @@ func verifyDataGroups(sod *document.SOD, raw map[string]string) (verified []int,
 		n, _ := strconv.Atoi(m[1])
 		nums = append(nums, n)
 	}
+	slices.Sort(nums)
+	return nums
+}
+
+// verifyDataGroups checks every presented DGn against the SOD hash list. A
+// presented data group that the SOD does not cover is rejected (data
+// injection), as is any hash mismatch.
+func verifyDataGroups(sod *document.SOD, raw map[string]string) (verified []int, reason string, err error) {
+	hasher := cms.DefaultCryptoHasher{}
+	alg := sod.LdsSecurityObject.HashAlgorithm.Algorithm
+
+	nums := presentedDGNumbers(raw)
 	if len(nums) == 0 {
 		return nil, ReasonDG1Missing, errors.New("no data groups presented")
 	}
-	slices.Sort(nums)
-
 	for _, n := range nums {
 		data, derr := decodeDG(raw["DG"+strconv.Itoa(n)])
 		if derr != nil || len(data) == 0 {
@@ -391,21 +411,24 @@ func crossCheckMRZ(dg1 *document.DG1, c Claimed) error {
 			return errors.New("given name differs between chip and scan")
 		}
 	}
-	if c.Nationality != "" {
-		want, err := NormalizeCountry(m.Nationality)
-		got, err2 := resolveClaimedCountry(c.Nationality)
-		if err != nil || err2 != nil || want != got {
-			return errors.New("nationality differs between chip and scan")
-		}
+	if c.Nationality != "" && !sameCountry(m.Nationality, c.Nationality) {
+		return errors.New("nationality differs between chip and scan")
 	}
-	if c.IssuingCountry != "" {
-		want, err := NormalizeCountry(m.IssuingState)
-		got, err2 := resolveClaimedCountry(c.IssuingCountry)
-		if err != nil || err2 != nil || want != got {
-			return errors.New("issuing state differs between chip and scan")
-		}
+	if c.IssuingCountry != "" && !sameCountry(m.IssuingState, c.IssuingCountry) {
+		return errors.New("issuing state differs between chip and scan")
 	}
 	return nil
+}
+
+// sameCountry reports whether an MRZ country code and a claimed country
+// denote the same state. Unresolvable values never match (fail closed).
+func sameCountry(mrzCode, claimed string) bool {
+	want, err := NormalizeCountry(mrzCode)
+	if err != nil {
+		return false
+	}
+	got, err := resolveClaimedCountry(claimed)
+	return err == nil && want == got
 }
 
 // sameMRZDate compares an MRZ YYMMDD date with a YYYY-MM-DD claim. The century
