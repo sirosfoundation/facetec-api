@@ -274,6 +274,7 @@ func TestSameMRZDate(t *testing.T) {
 	assert.True(t, sameMRZDate("310930", "2031-09-30", false))
 	assert.False(t, sameMRZDate("310930", "2131-09-30", false))
 	assert.False(t, sameMRZDate("310930", "1931-09-30", false))
+	assert.False(t, sameMRZDate("310230", "2031-02-30", false), "impossible expiry date")
 	assert.False(t, sameMRZDate("ab0307", "2010-03-07", true))
 	assert.False(t, sameMRZDate("100230", "2010-02-30", true), "invalid calendar date")
 }

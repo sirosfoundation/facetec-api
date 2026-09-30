@@ -495,21 +495,19 @@ func sameMRZDate(mrzDate, iso string, birth bool) bool {
 	if mrzDate[2:] != iso[5:7]+iso[8:10] || mrzDate[:2] != iso[2:4] {
 		return false
 	}
-	year, err := strconv.Atoi(iso[:4])
+	claimed, err := time.Parse("2006-01-02", iso) // rejects impossible calendar dates
 	if err != nil {
 		return false
 	}
 	century := 2000
 	if birth {
+		// Resolve the century from the MRZ date: a birth date is never in the future.
 		t, err := time.Parse("2006-01-02", "20"+mrzDate[:2]+"-"+iso[5:7]+"-"+iso[8:10])
-		if err != nil {
-			return false
-		}
-		if t.After(now()) {
+		if err != nil || t.After(now()) {
 			century = 1900
 		}
 	}
-	return year == century+int(mrzDate[0]-'0')*10+int(mrzDate[1]-'0')
+	return claimed.Year() == century+int(mrzDate[0]-'0')*10+int(mrzDate[1]-'0')
 }
 
 func equalAlnum(a, b string) bool { return fold(a, true) == fold(b, true) && fold(a, true) != "" }

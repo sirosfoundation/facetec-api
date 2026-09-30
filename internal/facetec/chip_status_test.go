@@ -46,6 +46,16 @@ func TestExtractScanResult_StatusEnumWrongType_IsFatal(t *testing.T) {
 	}
 }
 
+func TestExtractScanResult_ChipAuthStatusOutOfRange_IsFatal(t *testing.T) {
+	for _, v := range []float64{-1, 6, 99} {
+		p := realPayload()
+		p["idScanResultsSoFar"].(map[string]any)["nfcAuthenticationStatusEnumInt"] = v
+		if _, ok, err := ExtractScanResult(p); err == nil || ok {
+			t.Errorf("status %v: want error and ok=false, got err=%v ok=%v", v, err, ok)
+		}
+	}
+}
+
 func TestExtractScanResult_StatusEnumAbsent_NotFatal(t *testing.T) {
 	p := realPayload()
 	results := p["idScanResultsSoFar"].(map[string]any)

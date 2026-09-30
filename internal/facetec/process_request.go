@@ -127,6 +127,11 @@ func ExtractScanResult(payload map[string]any) (*ScanResult, bool, error) {
 	if err != nil {
 		return nil, false, fmt.Errorf("facetec: nfcAuthenticationStatusEnumInt: %w", err)
 	}
+	// Only 0-5 are defined; an unknown (possibly new failure) state must not
+	// slip past the hard chip-auth gate as "neither verified nor failed".
+	if nfcAuthStatus < 0 || nfcAuthStatus > 5 {
+		return nil, false, fmt.Errorf("facetec: nfcAuthenticationStatusEnumInt: unknown value %d", nfcAuthStatus)
+	}
 	barcodeStatus, _, err := lookupEnumInt(results["barcodeStatusEnumInt"])
 	if err != nil {
 		return nil, false, fmt.Errorf("facetec: barcodeStatusEnumInt: %w", err)
