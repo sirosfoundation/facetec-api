@@ -197,6 +197,7 @@ func TestVerify_MRZMismatch(t *testing.T) {
 		"missing expiry":  func(c *Claimed) { c.DateOfExpiry = "" },
 		"bad nationality": func(c *Claimed) { c.Nationality = "??" },
 		"sex":             func(c *Claimed) { c.Sex = "M" },
+		"non-latin given": func(c *Claimed) { c.GivenName = "Анна" },
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/kelseyhightower/envconfig"
+	"github.com/sirosfoundation/go-trust/pkg/authzenclient"
 	"gopkg.in/yaml.v3"
 )
 
@@ -278,6 +279,11 @@ func (c *Config) Validate() error {
 
 	if c.Trust.Required && c.Trust.PDPURL == "" {
 		return fmt.Errorf("config: trust.pdp_url is required when trust.required is true (set trust.required: false only for development)")
+	}
+	if c.Trust.PDPURL != "" {
+		if _, err := authzenclient.ParseBaseURL(c.Trust.PDPURL); err != nil {
+			return fmt.Errorf("config: trust.pdp_url is invalid: %w", err)
+		}
 	}
 	if c.Trust.Timeout < 0 {
 		return fmt.Errorf("config: trust.timeout must not be negative")

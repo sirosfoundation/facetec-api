@@ -64,6 +64,8 @@ const (
 	// been signed (passports are valid for at most 10 years; margin included).
 	maxDocumentValidity = 11 * 365 * 24 * time.Hour
 
+	isoDate = "2006-01-02"
+
 	maxDataGroupBytes = 4 << 20
 	sodKey            = "SOD"
 	dg1Key            = "DG1"
@@ -205,7 +207,7 @@ func plausibleSigningTime(st *time.Time, expiryISO string) error {
 	if st.After(now().Add(signingTimeSkew)) {
 		return errors.New("SOD signing time is in the future")
 	}
-	expiry, err := time.Parse("2006-01-02", expiryISO)
+	expiry, err := time.Parse(isoDate, expiryISO)
 	if err != nil {
 		return errors.New("cannot bound SOD signing time without a valid expiry date")
 	}
@@ -535,14 +537,14 @@ func sameMRZDate(mrzDate, iso string, birth bool) bool {
 	if mrzDate[2:] != iso[5:7]+iso[8:10] || mrzDate[:2] != iso[2:4] {
 		return false
 	}
-	claimed, err := time.Parse("2006-01-02", iso) // rejects impossible calendar dates
+	claimed, err := time.Parse(isoDate, iso) // rejects impossible calendar dates
 	if err != nil {
 		return false
 	}
 	century := 2000
 	if birth {
 		// Resolve the century from the MRZ date: a birth date is never in the future.
-		t, err := time.Parse("2006-01-02", "20"+mrzDate[:2]+"-"+iso[5:7]+"-"+iso[8:10])
+		t, err := time.Parse(isoDate, "20"+mrzDate[:2]+"-"+iso[5:7]+"-"+iso[8:10])
 		if err != nil || t.After(now()) {
 			century = 1900
 		}
@@ -552,7 +554,9 @@ func sameMRZDate(mrzDate, iso string, birth bool) bool {
 
 func equalAlnum(a, b string) bool { return fold(a, true) == fold(b, true) && fold(a, true) != "" }
 
-func equalAlpha(a, b string) bool { return fold(a, false) == fold(b, false) }
+// equalAlpha compares names over the MRZ repertoire. A claim that folds to
+// nothing (e.g. a non-Latin name) never matches: DG1 cannot vouch for it.
+func equalAlpha(a, b string) bool { return fold(b, false) != "" && fold(a, false) == fold(b, false) }
 
 // fold upper-cases and keeps only A-Z (and 0-9 when digits is true), which is
 // the MRZ repertoire ('<' and spaces in names, filler characters, etc. drop).

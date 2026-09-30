@@ -351,3 +351,14 @@ func TestValidate_TrustNegativeTimeout(t *testing.T) {
 		t.Error("negative trust.timeout must be rejected")
 	}
 }
+
+func TestValidate_TrustPDPURLMustBeHTTPBaseURL(t *testing.T) {
+	for _, bad := range []string{":", "pdp.example.org", "ftp://pdp.example.org", "https://"} {
+		cfg := validBase()
+		cfg.Trust.Required = true
+		cfg.Trust.PDPURL = bad
+		if err := cfg.Validate(); err == nil {
+			t.Errorf("trust.pdp_url %q must be rejected at startup", bad)
+		}
+	}
+}
