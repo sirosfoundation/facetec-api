@@ -34,8 +34,8 @@ func TestExtractScanResult_ChipAuthStatus(t *testing.T) {
 
 // A wrongly typed status enum must fail closed (error), not read as 0.
 func TestExtractScanResult_StatusEnumWrongType_IsFatal(t *testing.T) {
-	for _, key := range []string{"nfcAuthenticationStatusEnumInt", "mrzStatusEnumInt", "barcodeStatusEnumInt"} {
-		for name, bad := range map[string]any{"string": "FAILED", "bool": true, "float": 3.5, "object": map[string]any{}} {
+	for _, key := range []string{"nfcAuthenticationStatusEnumInt", "mrzStatusEnumInt", "barcodeStatusEnumInt", "nfcStatusEnumInt"} {
+		for name, bad := range map[string]any{"string": "FAILED", "numeric string": "2", "bool": true, "float": 3.5, "object": map[string]any{}} {
 			p := realPayload()
 			p["idScanResultsSoFar"].(map[string]any)[key] = bad
 			_, ok, err := ExtractScanResult(p)

@@ -133,6 +133,12 @@ func decisionFrom(resp *authzen.EvaluationResponse) (TrustDecision, error) {
 	if d.Code == "" {
 		d.Code = firstString(reasonMap(resp, "user"), "code")
 	}
+	if resp.Context != nil && resp.Context.Reason != nil {
+		// The go-trust eMRTD registry also sets the code at the top level.
+		if top, ok := resp.Context.Reason["code"].(string); ok && top != "" {
+			d.Code = top
+		}
+	}
 	d.Code = sanitizeCode(d.Code)
 	if !resp.Decision {
 		return d, nil

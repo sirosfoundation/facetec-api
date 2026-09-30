@@ -85,7 +85,7 @@ func ExtractScanResult(payload map[string]any) (*ScanResult, bool, error) {
 	// final and ready to evaluate" — 4 = COMPLETE. Other values (FRONT_RETRY,
 	// BACK, BACK_RETRY, USER_CONFIRM, NFC) mean the SDK still has another step
 	// to perform, so there's nothing to evaluate yet.
-	nextStep, ok, err := lookupInt(results["photoIDNextStepEnumInt"])
+	nextStep, ok, err := lookupEnumInt(results["photoIDNextStepEnumInt"])
 	if err != nil {
 		return nil, false, fmt.Errorf("facetec: photoIDNextStepEnumInt: %w", err)
 	}
@@ -119,15 +119,15 @@ func ExtractScanResult(payload map[string]any) (*ScanResult, bool, error) {
 	// A present-but-wrongly-typed value is an error (fail closed): silently
 	// reading it as 0 would turn e.g. a FAILED (3) chip authentication into
 	// "not applicable".
-	mrzStatus, _, err := lookupInt(results["mrzStatusEnumInt"])
+	mrzStatus, _, err := lookupEnumInt(results["mrzStatusEnumInt"])
 	if err != nil {
 		return nil, false, fmt.Errorf("facetec: mrzStatusEnumInt: %w", err)
 	}
-	nfcAuthStatus, _, err := lookupInt(results["nfcAuthenticationStatusEnumInt"])
+	nfcAuthStatus, _, err := lookupEnumInt(results["nfcAuthenticationStatusEnumInt"])
 	if err != nil {
 		return nil, false, fmt.Errorf("facetec: nfcAuthenticationStatusEnumInt: %w", err)
 	}
-	barcodeStatus, _, err := lookupInt(results["barcodeStatusEnumInt"])
+	barcodeStatus, _, err := lookupEnumInt(results["barcodeStatusEnumInt"])
 	if err != nil {
 		return nil, false, fmt.Errorf("facetec: barcodeStatusEnumInt: %w", err)
 	}
@@ -139,7 +139,7 @@ func ExtractScanResult(payload map[string]any) (*ScanResult, bool, error) {
 	// treated as "not skipped") must not be silently swallowed into 0/false --
 	// that would fail open, letting a scan with an unreadable NFC status
 	// through as if NFC had never been skipped.
-	nfcStatus, _, err := lookupInt(results["nfcStatusEnumInt"])
+	nfcStatus, _, err := lookupEnumInt(results["nfcStatusEnumInt"])
 	if err != nil {
 		return nil, false, fmt.Errorf("facetec: nfcStatusEnumInt: %w", err)
 	}
@@ -470,6 +470,15 @@ func remarshalInto(src any, dst any) error {
 func lookupString(value any) (string, bool) {
 	s, ok := value.(string)
 	return s, ok && s != ""
+}
+
+// lookupEnumInt is lookupInt for enum status fields, which FaceTec sends as
+// JSON numbers: a string (even a numeric one) is a wrong type and fails closed.
+func lookupEnumInt(value any) (int, bool, error) {
+	if _, isString := value.(string); isString {
+		return 0, false, fmt.Errorf("unsupported type %T", value)
+	}
+	return lookupInt(value)
 }
 
 func lookupInt(value any) (int, bool, error) {

@@ -233,3 +233,14 @@ func TestPDP_AllowWithMalformedAnchorFingerprintIsMalformed(t *testing.T) {
 		assert.False(t, d.Trusted)
 	}
 }
+
+func TestPDP_DenyCodeFromTopLevelReason(t *testing.T) {
+	var hits atomic.Int32
+	p := pdpServer(t, &hits, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"decision":false,"context":{"reason":{"code":"unknown_country","admin":{"detail":"x"}}}}`))
+	})
+	d, err := p.EvaluateDSC(t.Context(), sampleRequest())
+	require.NoError(t, err)
+	assert.False(t, d.Trusted)
+	assert.Equal(t, "unknown_country", d.Code)
+}
