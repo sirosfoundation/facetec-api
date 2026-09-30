@@ -74,6 +74,7 @@ type Claimed struct {
 	DateOfExpiry   string // YYYY-MM-DD
 	Nationality    string
 	IssuingCountry string
+	Sex            string // M/F/X (or MALE/FEMALE)
 }
 
 // Result is the outcome of local passive authentication.
@@ -407,6 +408,9 @@ func crossCheckMRZ(dg1 *document.DG1, c Claimed) error {
 	if err := crossCheckNames(m, c); err != nil {
 		return err
 	}
+	if c.Sex != "" && normalizeSex(m.Sex) != normalizeSex(c.Sex) {
+		return errors.New("sex differs between chip and scan")
+	}
 	if c.Nationality != "" && !sameCountry(m.Nationality, c.Nationality) {
 		return errors.New("nationality differs between chip and scan")
 	}
@@ -414,6 +418,19 @@ func crossCheckMRZ(dg1 *document.DG1, c Claimed) error {
 		return errors.New("issuing state differs between chip and scan")
 	}
 	return nil
+}
+
+// normalizeSex maps an MRZ sex marker or a claimed sex string to M, F or X
+// (unspecified, including the MRZ filler '<').
+func normalizeSex(s string) string {
+	switch strings.ToUpper(strings.TrimSpace(s)) {
+	case "M", "MALE":
+		return "M"
+	case "F", "FEMALE":
+		return "F"
+	default:
+		return "X"
+	}
 }
 
 // crossCheckNames compares the holder name fields the claim carries.

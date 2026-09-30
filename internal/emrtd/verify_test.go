@@ -196,6 +196,7 @@ func TestVerify_MRZMismatch(t *testing.T) {
 		"malformed date":  func(c *Claimed) { c.DateOfBirth = "07 MAR 1985" },
 		"missing expiry":  func(c *Claimed) { c.DateOfExpiry = "" },
 		"bad nationality": func(c *Claimed) { c.Nationality = "??" },
+		"sex":             func(c *Claimed) { c.Sex = "M" },
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -268,4 +269,20 @@ func TestSameMRZDate(t *testing.T) {
 
 func TestDSCFingerprint_Empty(t *testing.T) {
 	assert.Equal(t, "", (&Result{}).DSCFingerprint())
+}
+
+func TestVerify_SexMatches(t *testing.T) {
+	for _, s := range []string{"F", "f", "FEMALE", ""} {
+		c := emrtdtest.New(emrtdtest.Options{})
+		cl := claimedFor(c)
+		cl.Sex = s
+		assert.True(t, Verify(c.Raw, cl).OK, "sex %q", s)
+	}
+}
+
+func TestNormalizeSex(t *testing.T) {
+	assert.Equal(t, "M", normalizeSex(" male "))
+	assert.Equal(t, "F", normalizeSex("F"))
+	assert.Equal(t, "X", normalizeSex("<"))
+	assert.Equal(t, "X", normalizeSex("X"))
 }

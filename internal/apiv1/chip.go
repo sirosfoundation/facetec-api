@@ -28,7 +28,8 @@ func newChipChecker(cfg config.TrustConfig) *emrtd.Checker {
 // scan must be rejected regardless of the SPOCP policy:
 //
 //   - FaceTec reported a failed chip authentication (status 3 or 5), or
-//   - trust.required is set and chip data was presented but is not trusted.
+//   - trust.required is set and chip evidence (a non-zero chip auth status or
+//     any raw chip data) was presented but is not trusted.
 //
 // Status 1 (NOT_SUPPORTED_BY_DOCUMENT: no AA/CA on the chip) is permitted: it
 // is a weaker clone-detection signal and is surfaced in the audit log through
@@ -50,13 +51,17 @@ func (c *Client) assessChip(ctx context.Context, scan *facetec.ScanResult) *idve
 		DateOfExpiry:   dd.DateOfExpiry,
 		Nationality:    dd.Nationality,
 		IssuingCountry: dd.IssuingCountry,
+		Sex:            dd.Sex,
 	})
 	id.ChipTrusted = out.Trusted
 	id.ChipTrustReason = out.Reason
 	id.ChipDSCSHA256 = out.Local.DSCFingerprint()
 	id.ChipCSCASHA256 = out.Decision.CSCASHA256
 
-	if c.chip.Required() && out.ChipPresented && !out.Trusted {
+	// Any sign of a chip read counts as presented, so an incomplete payload
+	// (status reported but SOD missing, stray raw fields) cannot dodge the gate.
+	presented := out.ChipPresented || id.ChipAuthStatus != 0 || len(id.ChipRaw) > 0
+	if c.chip.Required() && presented && !out.Trusted {
 		return idverrors.Newf(idverrors.CodeChipUntrusted, "eMRTD chip is not trusted (%s)", out.Reason)
 	}
 	return nil

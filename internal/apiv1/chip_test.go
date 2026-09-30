@@ -146,7 +146,7 @@ func TestProcessRequest_NotRequiredUntrustedChipLeftToPolicy(t *testing.T) {
 func TestProcessRequest_NoChipDataLeftToPolicyEvenWhenRequired(t *testing.T) {
 	chip := emrtdtest.New(emrtdtest.Options{})
 	pdp := &fakeEvaluator{}
-	c, ctx := chipClient(t, chipPayload(t, chip, 4, false), pdp, true)
+	c, ctx := chipClient(t, chipPayload(t, chip, 0, false), pdp, true)
 	resp := process(t, c, ctx)
 	assert.Equal(t, string(idverrors.CodePolicyRejected), resp.CredentialIssueErrCode,
 		"doc types without a chip (e.g. dl) are governed by SPOCP rules; the passport rule demands chip-trusted")
@@ -213,4 +213,34 @@ func TestNewChipChecker(t *testing.T) {
 	})
 	assert.False(t, out.Trusted)
 	assert.Equal(t, emrtd.ReasonPDPError, out.Reason, "unreachable PDP fails closed")
+}
+
+func TestAssessChip_RequiredRejectsIncompleteChipEvidence(t *testing.T) {
+	cases := map[string]facetec.IDScanResult{
+		"status without raw data": {ChipAuthStatus: 4},
+		"raw data without SOD":    {ChipRaw: map[string]string{"DG1": "AA=="}},
+	}
+	for name, id := range cases {
+		t.Run(name, func(t *testing.T) {
+			c := &Client{chip: emrtd.NewChecker(&fakeEvaluator{}, true)}
+			scan := &facetec.ScanResult{IDScan: id}
+			err := c.assessChip(t.Context(), scan)
+			require.NotNil(t, err)
+			assert.Equal(t, idverrors.CodeChipUntrusted, err.Code)
+			assert.False(t, scan.IDScan.ChipTrusted)
+		})
+	}
+}
+
+func TestAssessChip_RequiredAllowsNoChipAtAll(t *testing.T) {
+	c := &Client{chip: emrtd.NewChecker(&fakeEvaluator{}, true)}
+	require.Nil(t, c.assessChip(t.Context(), &facetec.ScanResult{}))
+}
+
+func TestProcessRequest_RequiredStatusWithoutChipDataRejected(t *testing.T) {
+	chip := emrtdtest.New(emrtdtest.Options{})
+	c, ctx := chipClient(t, chipPayload(t, chip, 4, false), &fakeEvaluator{}, true)
+	resp := process(t, c, ctx)
+	assert.Equal(t, string(idverrors.CodeChipUntrusted), resp.CredentialIssueErrCode,
+		"AUTHENTICATED status with no raw chip data must not dodge trust.required")
 }
