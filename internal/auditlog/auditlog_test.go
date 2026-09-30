@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -156,5 +157,34 @@ func TestWebhookLogger_RedirectReturnsError(t *testing.T) {
 	err = logger.Write(context.Background(), Record{SessionID: "redirect-test"})
 	if err == nil {
 		t.Fatal("expected error for 3xx response")
+	}
+}
+
+func TestRecord_ChipFieldsRoundTrip(t *testing.T) {
+	rec := Record{
+		SessionID: "s", Outcome: OutcomeAccept,
+		ChipTrusted: true, ChipTrustReason: "ok", ChipAuthStatus: 1,
+		ChipDSCSHA256: "aa", ChipCSCASHA256: "bb",
+	}
+	b, err := json.Marshal(rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatal(err)
+	}
+	for k, want := range map[string]any{
+		"chip_trusted": true, "chip_trust_reason": "ok", "chip_auth_status": float64(1),
+		"chip_dsc_sha256": "aa", "chip_csca_sha256": "bb",
+	} {
+		if m[k] != want {
+			t.Errorf("%s = %v, want %v", k, m[k], want)
+		}
+	}
+	// Untrusted chips must still serialise chip_trusted=false explicitly.
+	b, _ = json.Marshal(Record{})
+	if !strings.Contains(string(b), `"chip_trusted":false`) {
+		t.Errorf("chip_trusted must always be present: %s", b)
 	}
 }

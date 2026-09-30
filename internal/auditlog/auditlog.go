@@ -46,11 +46,22 @@ type Record struct {
 	MRZVerified     bool      `json:"mrz_verified"`
 	NFCVerified     bool      `json:"nfc_verified"`
 	BarcodeVerified bool      `json:"barcode_verified"`
-	CredentialOffer string    `json:"credential_offer,omitempty"`
-	EvidenceHash    string    `json:"evidence_hash,omitempty"`
-	ReviewedBy      string    `json:"reviewed_by,omitempty"`
-	ReviewReason    string    `json:"review_reason,omitempty"`
-	DurationMS      int64     `json:"duration_ms"`
+	// ChipTrusted is true when facetec-api verified the eMRTD SOD and the
+	// go-trust PDP trusted the document signer (independent of NFCVerified,
+	// which is FaceTec's own chip check).
+	ChipTrusted     bool   `json:"chip_trusted"`
+	ChipTrustReason string `json:"chip_trust_reason,omitempty"`
+	// ChipAuthStatus is FaceTec's nfcAuthenticationStatusEnumInt. 1
+	// (NOT_SUPPORTED_BY_DOCUMENT: no AA/CA on the chip) is accepted but is a
+	// weaker clone-detection signal; it is recorded here as evidence.
+	ChipAuthStatus  int    `json:"chip_auth_status"`
+	ChipDSCSHA256   string `json:"chip_dsc_sha256,omitempty"`
+	ChipCSCASHA256  string `json:"chip_csca_sha256,omitempty"`
+	CredentialOffer string `json:"credential_offer,omitempty"`
+	EvidenceHash    string `json:"evidence_hash,omitempty"`
+	ReviewedBy      string `json:"reviewed_by,omitempty"`
+	ReviewReason    string `json:"review_reason,omitempty"`
+	DurationMS      int64  `json:"duration_ms"`
 }
 
 // Logger is the interface for writing audit records.

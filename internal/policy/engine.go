@@ -91,7 +91,11 @@ func (e *Engine) RuleCount() int {
 //   - face-match-level: 2-digit zero-padded (00–10)
 //
 // Field order: liveness-score, face-match-level, doc-type, mrz-verified,
-// nfc-verified, barcode-verified.
+// nfc-verified, barcode-verified, chip-trusted.
+//
+// chip-trusted is true only when facetec-api verified the eMRTD SOD itself and
+// the go-trust PDP trusts the document signer for the issuing state; it is
+// independent of nfc-verified (FaceTec's own chip check).
 func buildQueryElement(r facetec.ScanResult) sexp.Element {
 	livenessScore := int(r.Liveness.LivenessScore * 100)
 	return sexp.NewList("facetec-scan",
@@ -101,6 +105,7 @@ func buildQueryElement(r facetec.ScanResult) sexp.Element {
 		sexp.NewList("mrz-verified", sexp.NewAtom(boolStr(r.IDScan.MRZVerified))),
 		sexp.NewList("nfc-verified", sexp.NewAtom(boolStr(r.IDScan.NFCVerified))),
 		sexp.NewList("barcode-verified", sexp.NewAtom(boolStr(r.IDScan.BarcodeVerified))),
+		sexp.NewList("chip-trusted", sexp.NewAtom(boolStr(r.IDScan.ChipTrusted))),
 	)
 }
 

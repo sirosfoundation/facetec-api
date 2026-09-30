@@ -30,6 +30,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/sirosfoundation/facetec-api/internal/config"
+	"github.com/sirosfoundation/facetec-api/internal/emrtd"
 	"github.com/sirosfoundation/facetec-api/internal/facetec"
 	"github.com/sirosfoundation/facetec-api/internal/idverrors"
 	"github.com/sirosfoundation/facetec-api/internal/issuerclient"
@@ -45,6 +46,9 @@ type Client struct {
 	tenants  *tenant.Registry
 	sessions *session.Manager
 	issuer   *issuerclient.Client
+	// chip performs eMRTD passive authentication and asks the go-trust PDP
+	// about the document signer. nil is valid (no PDP, not required).
+	chip *emrtd.Checker
 }
 
 // New constructs a Client, wiring up all dependencies.
@@ -83,6 +87,7 @@ func New(_ context.Context, cfg *config.Config, registry *tenant.Registry, log *
 		tenants:  registry,
 		sessions: ses,
 		issuer:   issuer,
+		chip:     newChipChecker(cfg.Trust),
 	}, nil
 }
 
@@ -182,6 +187,15 @@ func (c *Client) SubmitIDScan(ctx context.Context, livenessSessionID string, idS
 		return "", "", idverrors.New(idverrors.CodeNFCSkipped, "NFC verification was skipped or failed")
 	}
 
+	// The legacy response carries no raw chip data, so chip-trusted is always
+	// false here (and trust.required rejects nothing it cannot see); policy
+	// rules that demand chip-trusted therefore reject this path.
+	if rej := c.assessChip(ctx, &scanResult); rej != nil {
+		c.log.Info("id-scan scan rejected: chip check",
+			zap.String("tenant", tc.ID), zap.String("reason", scanResult.IDScan.ChipTrustReason))
+		return "", "", rej
+	}
+
 	if err := tc.Policy.EvaluateScan(scanResult); err != nil {
 		c.log.Debug("scan rejected by policy",
 			zap.String("tenant", tc.ID),
@@ -197,13 +211,13 @@ func (c *Client) SubmitIDScan(ctx context.Context, livenessSessionID string, idS
 	}
 
 	// P6: structured audit record — no biometric or PII fields.
-	c.log.Info("AUDIT credential_issued",
+	c.log.Info("AUDIT credential_issued", append([]zap.Field{
 		zap.String("tenant", tc.ID),
 		zap.String("document_id", docID),
 		zap.String("doc_type", idScanResult.DocumentData.DocumentType),
 		zap.String("format", tc.Issuer.Format),
 		zap.String("scope", tc.Issuer.Scope),
-	)
+	}, chipAuditFields(scanResult.IDScan)...)...)
 	return docID, offerURL, nil
 }
 
@@ -253,6 +267,20 @@ func (c *Client) ProcessRequest(ctx context.Context, req *facetec.ProcessRequest
 		return resp, nil
 	}
 
+	// Failed FaceTec chip authentication (clone / signature failure) is a hard
+	// reject, and so is an untrusted chip when trust.required is set.
+	if rej := c.assessChip(ctx, scanResult); rej != nil {
+		c.log.Info("process-request scan rejected: chip check",
+			zap.String("tenant", tc.ID),
+			zap.String("doc_type", scanResult.IDScan.DocumentData.DocumentType),
+			zap.Int("chip_auth_status", scanResult.IDScan.ChipAuthStatus),
+			zap.String("chip_trust_reason", scanResult.IDScan.ChipTrustReason),
+		)
+		resp.CredentialIssueError = rej.Message
+		resp.CredentialIssueErrCode = string(rej.Code)
+		return resp, nil
+	}
+
 	if err := tc.Policy.EvaluateScan(*scanResult); err != nil {
 		c.log.Info("process-request scan rejected by policy",
 			zap.String("tenant", tc.ID),
@@ -273,13 +301,13 @@ func (c *Client) ProcessRequest(ctx context.Context, req *facetec.ProcessRequest
 		return resp, nil
 	}
 
-	c.log.Info("AUDIT credential_issued",
+	c.log.Info("AUDIT credential_issued", append([]zap.Field{
 		zap.String("tenant", tc.ID),
 		zap.String("document_id", docID),
 		zap.String("doc_type", scanResult.IDScan.DocumentData.DocumentType),
 		zap.String("format", tc.Issuer.Format),
 		zap.String("scope", tc.Issuer.Scope),
-	)
+	}, chipAuditFields(scanResult.IDScan)...)...)
 	resp.TransactionID = docID
 	resp.CredentialOfferURL = offerURL
 	return resp, nil

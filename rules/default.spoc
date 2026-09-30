@@ -6,14 +6,32 @@
 ; Face match levels are 2-digit zero-padded integers (00-10).
 ;
 ; Field order: liveness-score, face-match-level, doc-type, mrz-verified,
-;              nfc-verified, barcode-verified
+;              nfc-verified, barcode-verified, chip-trusted
 ; Rules may stop at any field — trailing query fields beyond the rule are ignored.
+;
+; chip-trusted is true only when facetec-api itself verified the eMRTD chip
+; (SOD signature + data-group hashes + DG1/MRZ cross-check) AND the go-trust PDP
+; says the document signer chains to a reviewed CSCA for the issuing state.
+; It is independent of nfc-verified, which is only FaceTec's own chip check
+; (hashes vs. the DSC embedded in the same chip -- integrity, not authenticity).
+; Positional matching means a rule that constrains chip-trusted must also list
+; the fields before it; (* set true false) matches either value.
+;
+; FaceTec nfcAuthenticationStatusEnumInt 3 (FAILED) and 5 (FAILED_DUE_TO_SIGNATURE_
+; VERIFICATION) are rejected in code regardless of these rules. Status 1
+; (NOT_SUPPORTED_BY_DOCUMENT: no Active/Chip Authentication on the chip) is
+; permitted, but it is a weaker clone-detection signal; it is recorded in the
+; audit log (chip_auth_status) so that it can be reviewed afterwards.
 ;
 ; Default thresholds: liveness >= 80, face-match >= 06.
 ; To tighten or relax thresholds per deployment, edit these rules directly.
 
-; Accept passports with MRZ verification
-(facetec-scan (liveness-score (* range numeric ge 080)) (face-match-level (* range numeric ge 06)) (doc-type passport) (mrz-verified true))
+; Accept passports with MRZ verification AND a chip whose document signer is trusted
+(facetec-scan (liveness-score (* range numeric ge 080)) (face-match-level (* range numeric ge 06)) (doc-type passport) (mrz-verified true) (nfc-verified (* set true false)) (barcode-verified (* set true false)) (chip-trusted true))
+; Relaxed variant (NOT recommended; no CSCA validation of the chip). Only for
+; deployments without a go-trust PDP (set trust.required: false). To use it,
+; comment out the rule above and uncomment this one:
+; (facetec-scan (liveness-score (* range numeric ge 080)) (face-match-level (* range numeric ge 06)) (doc-type passport) (mrz-verified true))
 ; Accept driving licences with barcode verification
 (facetec-scan (liveness-score (* range numeric ge 080)) (face-match-level (* range numeric ge 06)) (doc-type dl) (mrz-verified false) (nfc-verified false) (barcode-verified true))
 ; Accept national ID cards
@@ -24,8 +42,9 @@
 ; must query both "facetec-scan" (for accept/reject) and "facetec-scan-review"
 ; (for escalation) to enable the operator review path.
 ; Escalate borderline passports: liveness >= 60 AND face-match >= 4
-; (entries that also satisfy the accept rules above will match accept first)
-(facetec-scan-review (liveness-score (* range numeric ge 060)) (face-match-level (* range numeric ge 04)) (doc-type passport) (mrz-verified true))
+; (entries that also satisfy the accept rules above will match accept first).
+; A passport whose chip is not trusted must not be escalated for acceptance.
+(facetec-scan-review (liveness-score (* range numeric ge 060)) (face-match-level (* range numeric ge 04)) (doc-type passport) (mrz-verified true) (nfc-verified (* set true false)) (barcode-verified (* set true false)) (chip-trusted true))
 ; Escalate borderline driving licences
 (facetec-scan-review (liveness-score (* range numeric ge 060)) (face-match-level (* range numeric ge 04)) (doc-type dl) (barcode-verified true))
 ; Escalate borderline ID cards

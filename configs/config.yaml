@@ -69,6 +69,18 @@ policy:
   # Directory containing .spoc rule files loaded at startup.
   rules_dir: "./rules"
 
+# ── eMRTD document-signer trust (go-trust PDP) ────────────────────────────────
+# Passport chips are verified locally (SOD signature, data-group hashes, DG1 vs
+# scan) and the Document Signer Certificate is then checked by a go-trust PDP
+# against a reviewed CSCA list. Only certificates and a country code are sent.
+trust:
+  # pdp_url: "https://go-trust.example.org"
+  timeout: "5s"
+  # required=true (the default) refuses to start without pdp_url and rejects any
+  # untrusted chip outright. Development only: set false to run without a PDP
+  # (chip-trusted is then always false; the shipped passport rule will reject).
+  required: false
+
 # ── Session (in-memory only, never persisted) ─────────────────────────────────
 session:
   # How long a FaceMap is held between liveness and id-scan steps.

@@ -27,6 +27,11 @@ issuer:
 policy:
   rules_dir: "/etc/facetec-api/rules"
 
+trust:
+  pdp_url: "https://go-trust.internal"
+  timeout: "5s"
+  required: true
+
 session:
   liveness_ttl: "2m"
   offer_ttl: "5m"

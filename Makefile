@@ -24,6 +24,7 @@ GOTEST := GOWORK=off go test -v -race
 # every toolchain installation. Limiting to tested packages avoids the error.
 TESTPKGS := \
 	./internal/config/... \
+	./internal/emrtd/... \
 	./internal/middleware/... \
 	./internal/policy/... \
 	./internal/session/... \
