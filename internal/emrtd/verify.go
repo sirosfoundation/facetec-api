@@ -148,7 +148,9 @@ func Verify(raw map[string]string, claimed Claimed) *Result {
 	}
 	dg1, err := document.NewDG1(dg1Bytes)
 	if err != nil || dg1 == nil || dg1.Mrz == nil {
-		return fail(ReasonDGMalformed, "parse DG1: %v", err)
+		// gmrtd errors can embed raw MRZ fields (check-digit failures), so the
+		// cause is deliberately not propagated.
+		return fail(ReasonDGMalformed, "DG1 is not a valid MRZ")
 	}
 
 	state, err := NormalizeCountry(dg1.Mrz.IssuingState)

@@ -170,6 +170,7 @@ func TestVerify_DG1Unparsable(t *testing.T) {
 	res := Verify(c.Raw, claimedFor(c))
 	assert.False(t, res.OK)
 	assert.Equal(t, ReasonDGMalformed, res.Reason)
+	assert.Equal(t, "DG1 is not a valid MRZ", res.Detail, "parser errors may embed MRZ data")
 }
 
 func TestVerify_UnknownIssuingState(t *testing.T) {
