@@ -95,3 +95,19 @@ func TestExtractScanResult_ChipRawPopulated(t *testing.T) {
 		t.Errorf("ChipRaw = %v", result.IDScan.ChipRaw)
 	}
 }
+
+func TestExtractNFCRawData_MalformedContainersCountAsChipData(t *testing.T) {
+	for name, v := range map[string]any{
+		"rawData string":   map[string]any{"nfcValues": map[string]any{"rawData": "AAAA"}},
+		"rawData array":    map[string]any{"nfcValues": map[string]any{"rawData": []any{"x"}}},
+		"nfcValues string": map[string]any{"nfcValues": "x"},
+	} {
+		got := extractNFCRawData(v)
+		if len(got) == 0 {
+			t.Errorf("%s: malformed chip data must be non-empty evidence, got %v", name, got)
+		}
+		if got["SOD"] != "" {
+			t.Errorf("%s: malformed chip data must never carry a SOD", name)
+		}
+	}
+}

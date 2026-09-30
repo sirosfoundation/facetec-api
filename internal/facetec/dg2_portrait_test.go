@@ -171,3 +171,30 @@ func TestExtractScanResult_PhotoIDFaceCropTakesPrecedenceOverDG2(t *testing.T) {
 		t.Errorf("Portrait: got %q, want pre-cropped-photo (photoIDFaceCrop should win)", result.IDScan.DocumentData.Portrait)
 	}
 }
+
+// ChipPortrait must come from the chip's DG2 only: neither a photoIDFaceCrop
+// nor a flat upstream "portrait" property may be mistaken for it.
+func TestExtractScanResult_ChipPortraitOnlyFromDG2(t *testing.T) {
+	p := realPayload()
+	results := p["idScanResultsSoFar"].(map[string]any)
+	results["documentData"] = map[string]any{
+		"portrait": "flat-portrait",
+		"nfcValues": map[string]any{"rawData": map[string]any{
+			"DG2": iso19794DG2Base64,
+		}},
+	}
+	results["photoIDFaceCrop"] = "pre-cropped-photo"
+	result, ok, err := ExtractScanResult(p)
+	if err != nil || !ok {
+		t.Fatalf("err=%v ok=%v", err, ok)
+	}
+	if result.IDScan.ChipPortrait != iso19794FaceImageBase64 {
+		t.Errorf("ChipPortrait = %q, want the DG2 image", result.IDScan.ChipPortrait)
+	}
+
+	results["documentData"] = map[string]any{"portrait": "flat-portrait"}
+	result, _, _ = ExtractScanResult(p)
+	if result.IDScan.ChipPortrait != "" {
+		t.Errorf("ChipPortrait without DG2 = %q, want empty", result.IDScan.ChipPortrait)
+	}
+}

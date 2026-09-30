@@ -152,7 +152,7 @@ func ExtractScanResult(payload map[string]any) (*ScanResult, bool, error) {
 	// cropped/normalized, but don't clobber the NFC-derived portrait with an
 	// empty string when it's absent (confirmed absent in this deployment's
 	// FaceTec Server responses as of 2026-07-29).
-	chipPortrait := documentData.Portrait
+	chipPortrait := extractPortraitFromDG2(documentDataMap(results["documentData"]))
 	if portrait, ok := lookupString(results["photoIDFaceCrop"]); ok {
 		documentData.Portrait = portrait
 	} else if portrait, ok := lookupString(payload["photoIDFaceCrop"]); ok {
@@ -321,19 +321,23 @@ func ChipAuthStatusFailed(status int) bool {
 // empty strings, which can only make verification fail, never pass, while
 // still counting as chip evidence.
 func extractNFCRawData(value any) map[string]string {
-	var dd map[string]any
-	switch typed := value.(type) {
-	case map[string]any:
-		dd = typed
-	case string:
-		if err := json.Unmarshal([]byte(typed), &dd); err != nil {
-			return nil
-		}
-	default:
+	dd := documentDataMap(value)
+	nfcRaw, present := dd["nfcValues"]
+	if !present {
 		return nil
 	}
-	nfcValues, _ := dd["nfcValues"].(map[string]any)
-	rawData, _ := nfcValues["rawData"].(map[string]any)
+	nfcValues, ok := nfcRaw.(map[string]any)
+	if !ok {
+		return malformedRawData
+	}
+	rawAny, present := nfcValues["rawData"]
+	if !present {
+		return nil
+	}
+	rawData, ok := rawAny.(map[string]any)
+	if !ok {
+		return malformedRawData
+	}
 	if len(rawData) == 0 {
 		return nil
 	}
@@ -345,6 +349,28 @@ func extractNFCRawData(value any) map[string]string {
 		out[k] = s
 	}
 	return out
+}
+
+// malformedRawData stands in for chip data whose container has the wrong
+// JSON type: non-empty, so it counts as chip evidence, but without a SOD, so
+// it can never verify.
+var malformedRawData = map[string]string{"rawData": ""}
+
+// documentDataMap returns documentData as a map from either its object or
+// JSON-string form, or nil.
+func documentDataMap(value any) map[string]any {
+	switch typed := value.(type) {
+	case map[string]any:
+		return typed
+	case string:
+		var dd map[string]any
+		if err := json.Unmarshal([]byte(typed), &dd); err != nil {
+			return nil
+		}
+		return dd
+	default:
+		return nil
+	}
 }
 
 // extractPortraitFromDG2 extracts the face image embedded in the NFC chip's
