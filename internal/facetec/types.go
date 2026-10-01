@@ -61,8 +61,8 @@ type IDScanResult struct {
 	// ChipAuthStatus is FaceTec's nfcAuthenticationStatusEnumInt: 0 N/A,
 	// 1 NOT_SUPPORTED_BY_DOCUMENT (no AA/CA on the chip), 2 NOT_SUPPORTED_BY_SDK,
 	// 3 FAILED, 4 AUTHENTICATED, 5 FAILED_DUE_TO_SIGNATURE_VERIFICATION. Only 4
-	// (NFCVerified) is accepted; 3 and 5 get the specific chip_auth_failed
-	// refusal. Only set by ExtractScanResult.
+	// (NFCVerified) is accepted; 3 and 5 are refused as nfc_not_authenticated.
+	// Only set by ExtractScanResult.
 	ChipAuthStatus int `json:"chipAuthStatus"`
 	// ChipTrusted is true only when facetec-api itself verified the SOD and
 	// data-group hashes AND the go-trust PDP trusts the DSC for the issuing
