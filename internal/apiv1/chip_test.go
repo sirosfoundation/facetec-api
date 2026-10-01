@@ -314,3 +314,12 @@ func TestAssessChip_DocTypeMismatchRefusedOutright(t *testing.T) {
 	require.NotNil(t, err)
 	assert.Equal(t, idverrors.CodeChipUntrusted, err.Code)
 }
+
+// A scan with no reported document type is not exempt from trust.required.
+func TestAssessChip_RequiredAppliesWhenDocumentTypeMissing(t *testing.T) {
+	c := &Client{chip: emrtd.NewChecker(&fakeEvaluator{}, true)}
+	scan := &facetec.ScanResult{IDScan: facetec.IDScanResult{NFCVerified: true, ChipAuthStatus: 4}}
+	err := c.assessChip(t.Context(), scan)
+	require.NotNil(t, err)
+	assert.Equal(t, idverrors.CodeChipUntrusted, err.Code)
+}

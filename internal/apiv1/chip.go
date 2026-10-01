@@ -58,7 +58,8 @@ func (c *Client) assessChip(ctx context.Context, scan *facetec.ScanResult) *idve
 	if out.Trusted {
 		bindPortraitToChip(id, out.Local.DataGroups)
 	}
-	// trust.required is enforced for passports only: the PDP's eMRTD registry
+	// trust.required is enforced for passports (and for scans that reported no
+	// document type at all, which fail closed) only: the PDP's eMRTD registry
 	// covers ICAO 9303 travel documents, and other documents' chips (e.g. an
 	// ISO 18013 driving licence) are governed by the NFC gate and policy
 	// (nfc-verified), not by this check.
@@ -68,7 +69,7 @@ func (c *Client) assessChip(ctx context.Context, scan *facetec.ScanResult) *idve
 	if out.Reason == emrtd.ReasonDocTypeMismatch {
 		return idverrors.New(idverrors.CodeChipUntrusted, "eMRTD chip contradicts the reported document type")
 	}
-	if c.chip.Required() && id.DocumentData.DocumentType == "passport" && presented && !out.Trusted {
+	if c.chip.Required() && (id.DocumentData.DocumentType == "passport" || id.DocumentData.DocumentType == "") && presented && !out.Trusted {
 		return idverrors.Newf(idverrors.CodeChipUntrusted, "eMRTD chip is not trusted (%s)", out.Reason)
 	}
 	return nil
