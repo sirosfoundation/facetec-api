@@ -23,8 +23,11 @@ GOTEST := GOWORK=off go test -v -race
 # covdata tool (Go ≥ 1.20 multi-package coverage merge) which is not present in
 # every toolchain installation. Limiting to tested packages avoids the error.
 TESTPKGS := \
+	./internal/apiv1/... \
+	./internal/auditlog/... \
 	./internal/config/... \
 	./internal/emrtd/... \
+	./internal/facetec/... \
 	./internal/middleware/... \
 	./internal/policy/... \
 	./internal/session/... \

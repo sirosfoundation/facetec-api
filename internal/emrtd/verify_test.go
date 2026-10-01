@@ -315,7 +315,9 @@ func TestVerify_DocumentTypeBoundToMRZCode(t *testing.T) {
 		{"I<", "id_card", true},
 		{"A<", "id_card", true},
 		{"C<", "id_card", true},
-		{"P<", "dl", true},
+		{"P<", "dl", false},
+		{"I<", "dl", false},
+		{"P<", "unknown", false},
 		{"P<", "", true},
 	}
 	for _, tc := range cases {

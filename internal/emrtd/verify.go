@@ -480,7 +480,7 @@ var errDocTypeMismatch = errors.New("document type differs between chip and scan
 
 // crossCheckDocumentType binds the document type the policy will see to the
 // signed MRZ document code (ICAO 9303: P = passport, I/A/C = identity card).
-// Other claimed types (e.g. dl) are not eMRTDs and are not checked.
+// An empty claim is not checked; every other claimed type must match.
 func crossCheckDocumentType(m *mrz.MRZ, claimed string) error {
 	code := strings.ToUpper(strings.TrimSpace(m.DocumentCode))
 	switch claimed {
@@ -490,6 +490,12 @@ func crossCheckDocumentType(m *mrz.MRZ, claimed string) error {
 		}
 	case "id_card":
 		if code == "" || !strings.ContainsAny(code[:1], "IAC") {
+			return errDocTypeMismatch
+		}
+	default:
+		// A parsed ICAO DG1 is a passport or an ID card; any other non-empty
+		// claimed type (dl, unknown, ...) contradicts it.
+		if claimed != "" {
 			return errDocTypeMismatch
 		}
 	}
