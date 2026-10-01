@@ -199,6 +199,8 @@ func TestVerify_MRZMismatch(t *testing.T) {
 		"sex":               func(c *Claimed) { c.Sex = "M" },
 		"name digit suffix": func(c *Claimed) { c.FamilyName = c.FamilyName + "123" },
 		"doc number suffix": func(c *Claimed) { c.DocumentNumber = c.DocumentNumber + "#!" },
+		"doc number comma":  func(c *Claimed) { c.DocumentNumber = c.DocumentNumber + "," },
+		"doc number space":  func(c *Claimed) { c.DocumentNumber = c.DocumentNumber + " " },
 		"non-latin given":   func(c *Claimed) { c.GivenName = "Анна" },
 	}
 	for name, mutate := range cases {

@@ -581,16 +581,20 @@ func equalAlpha(a, b string) bool {
 }
 
 // representable reports whether every character of a claimed value is one the
-// MRZ normalisation (fold) either keeps or maps to a filler: letters (and
-// digits when digits is true), spaces, '<' and the usual name punctuation.
+// MRZ normalisation (fold) keeps: letters, and digits when digits is true
+// (document numbers: nothing else is allowed, since the claimed string is what
+// gets issued). Names may additionally contain spaces, '<' and the usual
+// name punctuation, which the MRZ renders as fillers.
 // Anything else (e.g. a digit suffix on a name) would be silently dropped by
 // fold, letting an altered claim ride on a chip-bound match while the original
 // string is what gets issued, so it never matches.
 func representable(s string, digits bool) bool {
 	for _, r := range strings.ToUpper(s) {
 		switch {
-		case r >= 'A' && r <= 'Z', r == ' ', r == '<', r == '-', r == '\'', r == '.', r == ',':
+		case r >= 'A' && r <= 'Z':
 		case digits && r >= '0' && r <= '9':
+		case !digits && (r == ' ' || r == '<' || r == '-' || r == '\'' || r == '.' || r == ','):
+			// Name punctuation: the MRZ renders it as a filler.
 		default:
 			return false
 		}
