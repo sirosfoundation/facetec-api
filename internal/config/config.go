@@ -293,7 +293,7 @@ func (c *Config) Validate() error {
 		if u.Scheme != "https" && !isLoopbackHost(u.Hostname()) {
 			return fmt.Errorf("config: trust.pdp_url must use https (plain http is only allowed for localhost development)")
 		}
-		if strings.TrimRight(c.Trust.PDPURL, "/") != origin {
+		if strings.TrimSuffix(c.Trust.PDPURL, "/") != origin {
 			return fmt.Errorf("config: trust.pdp_url must be a bare origin such as %s (no path, query or fragment)", origin)
 		}
 	}

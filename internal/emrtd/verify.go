@@ -42,17 +42,21 @@ import (
 // Reason codes reported in Result.Reason / ChipTrustReason. They are stable,
 // machine-readable identifiers suitable for audit records.
 const (
-	ReasonOK              = "ok"
-	ReasonNoChipData      = "no_chip_data"
-	ReasonSODMalformed    = "sod_malformed"
-	ReasonDGMalformed     = "dg_malformed"
-	ReasonSODSignature    = "sod_signature_invalid"
-	ReasonDGHashMismatch  = "dg_hash_mismatch"
-	ReasonDGNotInSOD      = "dg_not_in_sod"
-	ReasonDG1Missing      = "dg1_missing"
-	ReasonMRZMismatch     = "mrz_mismatch"
-	ReasonUnknownIssuer   = "unknown_issuing_state"
-	ReasonSigningTime     = "signing_time_implausible"
+	ReasonOK             = "ok"
+	ReasonNoChipData     = "no_chip_data"
+	ReasonSODMalformed   = "sod_malformed"
+	ReasonDGMalformed    = "dg_malformed"
+	ReasonSODSignature   = "sod_signature_invalid"
+	ReasonDGHashMismatch = "dg_hash_mismatch"
+	ReasonDGNotInSOD     = "dg_not_in_sod"
+	ReasonDG1Missing     = "dg1_missing"
+	ReasonMRZMismatch    = "mrz_mismatch"
+	ReasonUnknownIssuer  = "unknown_issuing_state"
+	ReasonSigningTime    = "signing_time_implausible"
+	// ReasonDocTypeMismatch: the signed DG1 document code contradicts the
+	// document type FaceTec reported. Callers refuse such scans outright, since
+	// the reported type selects which policy rule (and trust scope) applies.
+	ReasonDocTypeMismatch = "doc_type_mismatch"
 	ReasonPDPUnconfigured = "pdp_unconfigured"
 	ReasonPDPError        = "pdp_error"
 	ReasonPDPMalformed    = "pdp_malformed_response"
@@ -168,6 +172,9 @@ func Verify(raw map[string]string, claimed Claimed) *Result {
 	}
 
 	if err := crossCheckMRZ(dg1, claimed); err != nil {
+		if errors.Is(err, errDocTypeMismatch) {
+			return fail(ReasonDocTypeMismatch, "%v", err)
+		}
 		return fail(ReasonMRZMismatch, "%v", err)
 	}
 	if err := plausibleSigningTime(signingTime, claimed.DateOfExpiry); err != nil {
@@ -436,6 +443,10 @@ func resolveClaimedCountry(s string) (string, error) {
 func crossCheckMRZ(dg1 *document.DG1, c Claimed) error {
 	m := dg1.Mrz
 
+	if err := crossCheckDocumentType(m, c.DocumentType); err != nil {
+		return err
+	}
+
 	if c.DocumentNumber == "" || c.DateOfBirth == "" || c.DateOfExpiry == "" {
 		return errors.New("claimed document number/date of birth/date of expiry missing")
 	}
@@ -451,9 +462,6 @@ func crossCheckMRZ(dg1 *document.DG1, c Claimed) error {
 	if err := crossCheckNames(m, c); err != nil {
 		return err
 	}
-	if err := crossCheckDocumentType(m, c.DocumentType); err != nil {
-		return err
-	}
 	if c.Sex != "" && normalizeSex(m.Sex) != normalizeSex(c.Sex) {
 		return errors.New("sex differs between chip and scan")
 	}
@@ -466,6 +474,10 @@ func crossCheckMRZ(dg1 *document.DG1, c Claimed) error {
 	return nil
 }
 
+// errDocTypeMismatch is returned when the claimed document type contradicts the
+// signed MRZ document code.
+var errDocTypeMismatch = errors.New("document type differs between chip and scan")
+
 // crossCheckDocumentType binds the document type the policy will see to the
 // signed MRZ document code (ICAO 9303: P = passport, I/A/C = identity card).
 // Other claimed types (e.g. dl) are not eMRTDs and are not checked.
@@ -474,11 +486,11 @@ func crossCheckDocumentType(m *mrz.MRZ, claimed string) error {
 	switch claimed {
 	case "passport":
 		if !strings.HasPrefix(code, "P") {
-			return errors.New("document type differs between chip and scan")
+			return errDocTypeMismatch
 		}
 	case "id_card":
 		if code == "" || !strings.ContainsAny(code[:1], "IAC") {
-			return errors.New("document type differs between chip and scan")
+			return errDocTypeMismatch
 		}
 	}
 	return nil

@@ -296,3 +296,21 @@ func TestAssessChip_RequiredDoesNotApplyToDrivingLicence(t *testing.T) {
 	require.Nil(t, c.assessChip(t.Context(), scan))
 	assert.False(t, scan.IDScan.ChipTrusted)
 }
+
+// A passport chip reported as an id_card must be refused outright, not left to
+// the (nfc-only) ID-card rule, even when trust.required would not apply.
+func TestAssessChip_DocTypeMismatchRefusedOutright(t *testing.T) {
+	chip := emrtdtest.New(emrtdtest.Options{})
+	c := &Client{chip: emrtd.NewChecker(&fakeEvaluator{}, false)}
+	scan := &facetec.ScanResult{IDScan: facetec.IDScanResult{
+		NFCVerified: true, ChipAuthStatus: 4, ChipRaw: chip.Raw,
+		DocumentData: facetec.DocumentData{
+			GivenName: chip.GivenName, FamilyName: chip.FamilyName, DocumentNumber: chip.DocumentNumber,
+			DateOfBirth: chip.DateOfBirth, DateOfExpiry: chip.DateOfExpiry, Nationality: "SWE", IssuingCountry: "SWE",
+			DocumentType: "id_card",
+		},
+	}}
+	err := c.assessChip(t.Context(), scan)
+	require.NotNil(t, err)
+	assert.Equal(t, idverrors.CodeChipUntrusted, err.Code)
+}

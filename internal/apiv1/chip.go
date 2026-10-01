@@ -62,6 +62,12 @@ func (c *Client) assessChip(ctx context.Context, scan *facetec.ScanResult) *idve
 	// covers ICAO 9303 travel documents, and other documents' chips (e.g. an
 	// ISO 18013 driving licence) are governed by the NFC gate and policy
 	// (nfc-verified), not by this check.
+	// A signed document code that contradicts the reported type is refused
+	// outright: the reported type picks the policy rule, so it must not be
+	// usable to step outside the passport trust scope below.
+	if out.Reason == emrtd.ReasonDocTypeMismatch {
+		return idverrors.New(idverrors.CodeChipUntrusted, "eMRTD chip contradicts the reported document type")
+	}
 	if c.chip.Required() && id.DocumentData.DocumentType == "passport" && presented && !out.Trusted {
 		return idverrors.Newf(idverrors.CodeChipUntrusted, "eMRTD chip is not trusted (%s)", out.Reason)
 	}

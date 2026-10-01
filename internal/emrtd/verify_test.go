@@ -325,7 +325,7 @@ func TestVerify_DocumentTypeBoundToMRZCode(t *testing.T) {
 		res := Verify(c.Raw, cl)
 		assert.Equal(t, tc.ok, res.OK, "%s vs %s", tc.code, tc.claimed)
 		if !tc.ok {
-			assert.Equal(t, ReasonMRZMismatch, res.Reason)
+			assert.Equal(t, ReasonDocTypeMismatch, res.Reason)
 		}
 	}
 }

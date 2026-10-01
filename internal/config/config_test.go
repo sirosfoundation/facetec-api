@@ -394,3 +394,11 @@ func TestValidate_TrustPDPURLRequiresHTTPSExceptLoopback(t *testing.T) {
 		}
 	}
 }
+
+func TestValidate_TrustPDPURLAtMostOneTrailingSlash(t *testing.T) {
+	cfg := validBase()
+	cfg.Trust.PDPURL = "https://pdp.example///"
+	if err := cfg.Validate(); err == nil {
+		t.Error("multiple trailing slashes must be rejected")
+	}
+}

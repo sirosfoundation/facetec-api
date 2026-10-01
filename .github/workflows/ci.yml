@@ -31,6 +31,8 @@ jobs:
             -coverprofile=coverage.out \
             ./internal/apiv1/... \
             ./internal/config/... \
+            ./internal/emrtd/... \
+            ./internal/facetec/... \
             ./internal/issuerclient/... \
             ./internal/middleware/... \
             ./internal/policy/... \
