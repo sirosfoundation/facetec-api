@@ -122,7 +122,7 @@ technical and organisational measures (TOMs), and considerations relevant to GDP
 | Liveness score | Process RAM | Same as FaceMap | Same |
 | Signed credential | Process RAM (`session.Manager.offers`) | `session.offer_ttl` (default **5 min**) | Deleted atomically on first `GET /v1/offer/:txid`; TTL eviction |
 | Request logs | Log sink (operator-configured) | Operator's log retention policy | No personal data in log fields; see §2.3 |
-| Audit log event (`credential_issued`) | Log sink | Operator's log retention policy | Contains: tenant ID, transaction ID, doc type, format, scope — **no personal data** |
+| Audit log event (`credential_issued`) | Log sink | Operator's log retention policy | Contains: tenant ID, transaction ID, doc type, format, scope, chip trust outcome and reason code, FaceTec `chip_auth_status`, DSC/CSCA certificate fingerprints — **no name, MRZ or biometric data** (the SOD signing time is not logged) |
 
 > **Note:** facetec-api has no database and no persistent storage of any kind. All data described
 > above is held exclusively in process heap memory. A process restart or graceful shutdown
@@ -154,10 +154,10 @@ inter-controller agreement is required.
 
 ### 5.3 go-trust PDP (eMRTD document-signer trust)
 
-**Purpose.** For passports read over NFC, facetec-api asks a go-trust PDP whether the chip's
+**Purpose.** For every scan whose chip passes local verification, which covers passports and ICAO 9303 identity cards (not, for example, ISO 18013 driving licences, whose chips fail local verification before any PDP call), facetec-api asks a go-trust PDP whether the chip's
 Document Signer Certificate (DSC) chains to a reviewed Country Signing CA (CSCA).
 
-**What is sent.** Exactly three things, per passport scan:
+**What is sent.** Exactly three things, per such scan:
 1. the DSC and any other X.509 certificates carried in the chip's SOD (in the order found);
 2. the ISO 3166-1 alpha-3 issuing-state code taken from the signed DG1;
 3. the SOD signing time (CMS `signingTime`), when the SOD carries one, at full precision.
@@ -249,7 +249,7 @@ The following technical controls are implemented in code:
 | **One-time-use sessions** | Liveness entries and credential offers are deleted on first access (`TakeLiveness`, `TakeOffer`). An attacker cannot replay a session ID. |
 | **Rate limiting** | Biometric endpoints are rate-limited per source IP to slow automated bulk enumeration or scraping. |
 | **Short-lived sessions** | Default TTL of 2 min for liveness sessions limits the exposure window if a session ID is intercepted. |
-| **Audit trail without PII** | The `AUDIT credential_issued` log event records tenant ID, transaction ID, doc type, credential format, and scope — no name, date of birth, or other identity fields. |
+| **Audit trail without PII** | The `AUDIT credential_issued` log event records tenant ID, transaction ID, doc type, credential format, scope, the chip trust outcome and reason code, FaceTec `chip_auth_status` and the DSC/CSCA certificate fingerprints — no name, date of birth, or other identity fields. |
 | **TLS enforcement** | The listener supports TLS (`server.tls.enabled`). The connection to FaceTec Server uses TLS with configurable CA pinning; `skip_verify` is blocked if deployment validation checks detect production mode. |
 | **Authentication** | JWT-based authentication required for all `/v1/*` endpoints in production; algorithm confusion attacks are mitigated by explicit `jwt.WithValidMethods`. |
 
