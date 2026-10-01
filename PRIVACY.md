@@ -156,10 +156,14 @@ inter-controller agreement is required.
 
 For passports read over NFC, facetec-api asks a go-trust PDP (`trust.pdp_url`, operated by the
 same organisation) whether the chip's Document Signer Certificate chains to a reviewed CSCA. The
-request carries **only X.509 certificates (public data, identical for every passport signed by
-that DSC) and an ISO 3166-1 alpha-3 country code, plus optionally the SOD signing time**. No
-personal data, no SOD, no data groups, no MRZ and no biometric data are sent. The PDP is therefore
-not a processor of personal data. The chip data itself (SOD, DG1, DG2) is processed in memory
+request carries **only the X.509 certificates embedded in the SOD and an ISO 3166-1 alpha-3
+country code, plus optionally the SOD signing time**. For a genuine passport these are public
+data, identical for every passport signed by that DSC. No SOD, no data groups, no MRZ and no
+biometric data are sent. Until the PDP has validated the chain, however, the certificates are
+attacker-controlled input and a forged one could in principle carry arbitrary subject or SAN
+attributes; they are forwarded as received. The PDP must therefore be treated as receiving
+untrusted certificate metadata, and it is operated by the same organisation precisely so that it
+remains inside the same processing boundary and need not be assessed as a separate processor. The chip data itself (SOD, DG1, DG2) is processed in memory
 only, exactly like the rest of the scan, and only the outcome (`chip_trusted`, a reason code and
 certificate fingerprints) is written to the audit log.
 

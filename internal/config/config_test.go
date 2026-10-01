@@ -362,3 +362,18 @@ func TestValidate_TrustPDPURLMustBeHTTPBaseURL(t *testing.T) {
 		}
 	}
 }
+
+func TestValidate_TrustPDPURLRejectsNonOrigin(t *testing.T) {
+	for _, bad := range []string{"https://pdp.example/base", "https://pdp.example/base?x=y", "https://pdp.example/#f"} {
+		cfg := validBase()
+		cfg.Trust.PDPURL = bad
+		if err := cfg.Validate(); err == nil {
+			t.Errorf("trust.pdp_url %q carries a path/query/fragment and must be rejected", bad)
+		}
+	}
+	cfg := validBase()
+	cfg.Trust.PDPURL = "https://pdp.example:8443/"
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("origin with port and trailing slash must be accepted: %v", err)
+	}
+}

@@ -281,8 +281,14 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("config: trust.pdp_url is required when trust.required is true (set trust.required: false only for development)")
 	}
 	if c.Trust.PDPURL != "" {
-		if _, err := authzenclient.ParseBaseURL(c.Trust.PDPURL); err != nil {
+		origin, err := authzenclient.ParseBaseURL(c.Trust.PDPURL)
+		if err != nil {
 			return fmt.Errorf("config: trust.pdp_url is invalid: %w", err)
+		}
+		// ParseBaseURL strips path, query and fragment, but the client appends
+		// /evaluation to the configured string as-is: accept only a bare origin.
+		if strings.TrimRight(c.Trust.PDPURL, "/") != origin {
+			return fmt.Errorf("config: trust.pdp_url must be a bare origin such as %s (no path, query or fragment)", origin)
 		}
 	}
 	if c.Trust.Timeout < 0 {
