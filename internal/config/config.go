@@ -2,6 +2,8 @@ package config
 
 import (
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -287,6 +289,10 @@ func (c *Config) Validate() error {
 		}
 		// ParseBaseURL strips path, query and fragment, but the client appends
 		// /evaluation to the configured string as-is: accept only a bare origin.
+		u, _ := url.Parse(origin)
+		if u.Scheme != "https" && !isLoopbackHost(u.Hostname()) {
+			return fmt.Errorf("config: trust.pdp_url must use https (plain http is only allowed for localhost development)")
+		}
 		if strings.TrimRight(c.Trust.PDPURL, "/") != origin {
 			return fmt.Errorf("config: trust.pdp_url must be a bare origin such as %s (no path, query or fragment)", origin)
 		}
@@ -402,4 +408,14 @@ func defaultConfig() *Config {
 			Level: "info",
 		},
 	}
+}
+
+// isLoopbackHost reports whether host is localhost or a loopback IP, the only
+// place a plaintext PDP connection is tolerated (local development).
+func isLoopbackHost(host string) bool {
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }

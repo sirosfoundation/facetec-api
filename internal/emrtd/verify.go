@@ -552,11 +552,33 @@ func sameMRZDate(mrzDate, iso string, birth bool) bool {
 	return claimed.Year() == century+int(mrzDate[0]-'0')*10+int(mrzDate[1]-'0')
 }
 
-func equalAlnum(a, b string) bool { return fold(a, true) == fold(b, true) && fold(a, true) != "" }
+func equalAlnum(a, b string) bool {
+	return representable(b, true) && fold(a, true) == fold(b, true) && fold(a, true) != ""
+}
 
 // equalAlpha compares names over the MRZ repertoire. A claim that folds to
 // nothing (e.g. a non-Latin name) never matches: DG1 cannot vouch for it.
-func equalAlpha(a, b string) bool { return fold(b, false) != "" && fold(a, false) == fold(b, false) }
+func equalAlpha(a, b string) bool {
+	return representable(b, false) && fold(b, false) != "" && fold(a, false) == fold(b, false)
+}
+
+// representable reports whether every character of a claimed value is one the
+// MRZ normalisation (fold) either keeps or maps to a filler: letters (and
+// digits when digits is true), spaces, '<' and the usual name punctuation.
+// Anything else (e.g. a digit suffix on a name) would be silently dropped by
+// fold, letting an altered claim ride on a chip-bound match while the original
+// string is what gets issued, so it never matches.
+func representable(s string, digits bool) bool {
+	for _, r := range strings.ToUpper(s) {
+		switch {
+		case r >= 'A' && r <= 'Z', r == ' ', r == '<', r == '-', r == '\'', r == '.', r == ',':
+		case digits && r >= '0' && r <= '9':
+		default:
+			return false
+		}
+	}
+	return true
+}
 
 // fold upper-cases and keeps only A-Z (and 0-9 when digits is true), which is
 // the MRZ repertoire ('<' and spaces in names, filler characters, etc. drop).

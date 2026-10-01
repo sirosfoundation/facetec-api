@@ -216,6 +216,7 @@ func TestAssessChip_RequiredRejectsIncompleteChipEvidence(t *testing.T) {
 	for name, id := range cases {
 		t.Run(name, func(t *testing.T) {
 			c := &Client{chip: emrtd.NewChecker(&fakeEvaluator{}, true)}
+			id.DocumentData.DocumentType = "passport"
 			scan := &facetec.ScanResult{IDScan: id}
 			err := c.assessChip(t.Context(), scan)
 			require.NotNil(t, err)
@@ -262,7 +263,10 @@ func TestAssessChip_TrustedPortraitBoundToDG2(t *testing.T) {
 
 func TestAssessChip_RequiredRejectsMalformedRawData(t *testing.T) {
 	c := &Client{chip: emrtd.NewChecker(&fakeEvaluator{}, true)}
-	scan := &facetec.ScanResult{IDScan: facetec.IDScanResult{ChipRaw: map[string]string{"SOD": ""}}}
+	scan := &facetec.ScanResult{IDScan: facetec.IDScanResult{
+		ChipRaw:      map[string]string{"SOD": ""},
+		DocumentData: facetec.DocumentData{DocumentType: "passport"},
+	}}
 	err := c.assessChip(t.Context(), scan)
 	require.NotNil(t, err)
 	assert.Equal(t, idverrors.CodeChipUntrusted, err.Code)
@@ -277,4 +281,18 @@ func TestProcessRequest_Status4WithoutRawChipDataRefusedWhenRequired(t *testing.
 	resp := process(t, c, ctx)
 	assert.Equal(t, string(idverrors.CodeChipUntrusted), resp.CredentialIssueErrCode)
 	assert.Equal(t, 0, pdp.calls)
+}
+
+// trust.required is scoped to passports: an authenticated driving-licence chip
+// (not an ICAO eMRTD) is left to the NFC gate and policy.
+func TestAssessChip_RequiredDoesNotApplyToDrivingLicence(t *testing.T) {
+	c := &Client{chip: emrtd.NewChecker(&fakeEvaluator{}, true)}
+	scan := &facetec.ScanResult{IDScan: facetec.IDScanResult{
+		NFCVerified:    true,
+		ChipAuthStatus: 4,
+		ChipRaw:        map[string]string{"EF.COM": "AAAA"},
+		DocumentData:   facetec.DocumentData{DocumentType: "dl"},
+	}}
+	require.Nil(t, c.assessChip(t.Context(), scan))
+	assert.False(t, scan.IDScan.ChipTrusted)
 }

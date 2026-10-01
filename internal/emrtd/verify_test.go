@@ -183,21 +183,23 @@ func TestVerify_UnknownIssuingState(t *testing.T) {
 func TestVerify_MRZMismatch(t *testing.T) {
 	base := func(c *emrtdtest.Chip) Claimed { return claimedFor(c) }
 	cases := map[string]func(*Claimed){
-		"document number": func(c *Claimed) { c.DocumentNumber = "ZZ9999999" },
-		"date of birth":   func(c *Claimed) { c.DateOfBirth = "1985-03-08" },
-		"date of expiry":  func(c *Claimed) { c.DateOfExpiry = "2031-10-01" },
-		"family name":     func(c *Claimed) { c.FamilyName = "SVENSSON" },
-		"given name":      func(c *Claimed) { c.GivenName = "KARIN" },
-		"nationality":     func(c *Claimed) { c.Nationality = "NOR" },
-		"issuing country": func(c *Claimed) { c.IssuingCountry = "Norway" },
-		"unknown country": func(c *Claimed) { c.IssuingCountry = "Atlantis" },
-		"missing doc no":  func(c *Claimed) { c.DocumentNumber = "" },
-		"missing dob":     func(c *Claimed) { c.DateOfBirth = "" },
-		"malformed date":  func(c *Claimed) { c.DateOfBirth = "07 MAR 1985" },
-		"missing expiry":  func(c *Claimed) { c.DateOfExpiry = "" },
-		"bad nationality": func(c *Claimed) { c.Nationality = "??" },
-		"sex":             func(c *Claimed) { c.Sex = "M" },
-		"non-latin given": func(c *Claimed) { c.GivenName = "Анна" },
+		"document number":   func(c *Claimed) { c.DocumentNumber = "ZZ9999999" },
+		"date of birth":     func(c *Claimed) { c.DateOfBirth = "1985-03-08" },
+		"date of expiry":    func(c *Claimed) { c.DateOfExpiry = "2031-10-01" },
+		"family name":       func(c *Claimed) { c.FamilyName = "SVENSSON" },
+		"given name":        func(c *Claimed) { c.GivenName = "KARIN" },
+		"nationality":       func(c *Claimed) { c.Nationality = "NOR" },
+		"issuing country":   func(c *Claimed) { c.IssuingCountry = "Norway" },
+		"unknown country":   func(c *Claimed) { c.IssuingCountry = "Atlantis" },
+		"missing doc no":    func(c *Claimed) { c.DocumentNumber = "" },
+		"missing dob":       func(c *Claimed) { c.DateOfBirth = "" },
+		"malformed date":    func(c *Claimed) { c.DateOfBirth = "07 MAR 1985" },
+		"missing expiry":    func(c *Claimed) { c.DateOfExpiry = "" },
+		"bad nationality":   func(c *Claimed) { c.Nationality = "??" },
+		"sex":               func(c *Claimed) { c.Sex = "M" },
+		"name digit suffix": func(c *Claimed) { c.FamilyName = c.FamilyName + "123" },
+		"doc number suffix": func(c *Claimed) { c.DocumentNumber = c.DocumentNumber + "#!" },
+		"non-latin given":   func(c *Claimed) { c.GivenName = "Анна" },
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {

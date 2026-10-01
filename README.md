@@ -77,9 +77,9 @@ by environment variables. The full annotated reference is [configs/config.yaml](
 | `issuer.issuing_authority` | `ISSUER_ISSUING_AUTHORITY` | `issuer.authentic_source` | Photo ID `issuing_authority_unicode` (`mdoc` only) |
 | `issuer.issuing_country` | `ISSUER_ISSUING_COUNTRY` | scanned document's country | Photo ID `issuing_country`, ISO 3166-1 alpha-2 (`mdoc` only) |
 | `policy.rules_dir` | `POLICY_RULES_DIR` | *(empty)* | Directory of `.spoc` rule files |
-| `trust.pdp_url` | `TRUST_PDP_URL` | *(empty)* | Base URL of the go-trust AuthZEN PDP that decides whether an eMRTD document signer chains to a reviewed CSCA (`POST {url}/evaluation`). Empty = unconfigured: chips are verified locally but never reported as trusted |
+| `trust.pdp_url` | `TRUST_PDP_URL` | *(empty)* | Base origin of the go-trust AuthZEN PDP (must be `https`, no path; plain `http` only for localhost) that decides whether an eMRTD document signer chains to a reviewed CSCA (`POST {url}/evaluation`). Empty = unconfigured: chips are verified locally but never reported as trusted |
 | `trust.timeout` | `TRUST_TIMEOUT` | `5s` | Timeout of each PDP request attempt (one retry, transport errors only) |
-| `trust.required` | `TRUST_REQUIRED` | `true` | Fail closed: refuse to start without `trust.pdp_url`, and hard-reject any scan that presented chip data which is not trusted, independent of the SPOCP rules. Set `false` only for development or when no rule depends on `chip-trusted` |
+| `trust.required` | `TRUST_REQUIRED` | `true` | Fail closed: refuse to start without `trust.pdp_url`, and hard-reject any passport scan that presented chip data which is not trusted, independent of the SPOCP rules. Set `false` only for development or when no rule depends on `chip-trusted` |
 | `session.liveness_ttl` | `SESSION_LIVENESS_TTL` | `2m` | How long a FaceMap is held in memory |
 | `session.offer_ttl` | `SESSION_OFFER_TTL` | `5m` | How long a credential offer is held in memory |
 | `logging.level` | `LOG_LEVEL` | `info` | Log level: `debug`, `info`, `warn`, `error` |
@@ -319,7 +319,7 @@ only when facetec-api itself verified the SOD signature, every data-group hash a
 cross-check, **and** the go-trust PDP trusts the DSC for the issuing state
 (see [ADR-002](docs/adr/002-emrtd-document-signer-trust.md)). Passports need both. Passports whose
 chips lack Active/Chip Authentication (status 1) are therefore refused by design; this is a known
-coverage trade-off. With `trust.required`, a scan that passes the NFC gate (status 4) but whose raw
+coverage trade-off. With `trust.required` (passports only), a scan that passes the NFC gate (status 4) but whose raw
 chip data is missing or untrusted is refused with `chip_untrusted`.
 
 ## ETSI 119 461 §4.5 Compliance
