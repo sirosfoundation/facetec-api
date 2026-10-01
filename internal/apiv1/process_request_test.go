@@ -2,6 +2,7 @@ package apiv1
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -71,6 +72,25 @@ const nfcCompletedPayload = `{
 	}
 }`
 
+// nfcPayload is a completed passport scan with the given NFC outcome.
+func nfcPayload(nfcStatus, nfcAuthStatus int) string {
+	return fmt.Sprintf(`{
+	"idScanResultsSoFar": {
+		"photoIDNextStepEnumInt": 4,
+		"matchLevel": 7,
+		"nfcStatusEnumInt": %d,
+		"nfcAuthenticationStatusEnumInt": %d,
+		"mrzStatusEnumInt": 2,
+		"barcodeStatusEnumInt": 3,
+		"documentData": {
+			"givenName": "Alice",
+			"familyName": "Test",
+			"documentType": "passport"
+		}
+	}
+}`, nfcStatus, nfcAuthStatus)
+}
+
 func newTestClientForProcessRequest(t *testing.T, facetecBody string) *Client {
 	t.Helper()
 	ft := facetecServerStub(t, facetecBody)
@@ -113,10 +133,10 @@ func TestProcessRequest_NFCSkipped_RejectsWithoutIssuing(t *testing.T) {
 }
 
 // TestProcessRequest_NFCCompleted_DoesNotTriggerSkipGate is the inverse
-// check: a scan with NFC successfully read must not be rejected by the skip
-// gate. tc.Policy is the always-rejecting noRulesPolicy, so the scan is
-// still ultimately rejected -- but by CodePolicyRejected, proving the skip
-// gate was correctly bypassed rather than incorrectly firing.
+// check: a scan with the chip read and authenticated must pass the NFC gate.
+// tc.Policy is the always-rejecting noRulesPolicy, so the scan is still
+// ultimately rejected -- but by CodePolicyRejected, proving the NFC gate was
+// correctly passed rather than incorrectly firing.
 func TestProcessRequest_NFCCompleted_DoesNotTriggerSkipGate(t *testing.T) {
 	c := newTestClientForProcessRequest(t, nfcCompletedPayload)
 	tc := &tenant.Context{ID: "test-tenant", Policy: noRulesPolicy(t)}
@@ -126,7 +146,42 @@ func TestProcessRequest_NFCCompleted_DoesNotTriggerSkipGate(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, string(idverrors.CodePolicyRejected), resp.CredentialIssueErrCode)
-	assert.NotEqual(t, string(idverrors.CodeNFCSkipped), resp.CredentialIssueErrCode)
+}
+
+// TestProcessRequest_ChipNotAuthenticated_RejectsWithoutIssuing covers every
+// way a scan can end without an authenticated chip (#65). Before, only a
+// skipped read was refused: a user never prompted for NFC -- a document
+// template without NFC, or a device that cannot read it -- still got a
+// credential. Each case must be refused before policy evaluation, with a
+// code that tells the client why.
+func TestProcessRequest_ChipNotAuthenticated_RejectsWithoutIssuing(t *testing.T) {
+	cases := []struct {
+		name          string
+		nfcStatus     int
+		nfcAuthStatus int
+		want          idverrors.Code
+	}{
+		{"template requests no NFC", 0, 0, idverrors.CodeNFCNotRequested},
+		{"device not capable", 1, 0, idverrors.CodeNFCDeviceNotCapable},
+		{"user skipped", 2, 0, idverrors.CodeNFCSkipped},
+		{"error accessing chip", 3, 0, idverrors.CodeNFCChipReadFailed},
+		{"read but not authenticated", 4, 2, idverrors.CodeNFCNotAuthenticated},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			c := newTestClientForProcessRequest(t, nfcPayload(tt.nfcStatus, tt.nfcAuthStatus))
+			tc := &tenant.Context{ID: "test-tenant", Policy: noRulesPolicy(t)}
+			ctx := tenant.WithStdContext(t.Context(), tc)
+
+			resp, err := c.ProcessRequest(ctx, &facetec.ProcessRequestRequest{RequestBlob: "opaque"})
+			require.NoError(t, err)
+
+			assert.Equal(t, string(tt.want), resp.CredentialIssueErrCode)
+			assert.NotEmpty(t, resp.CredentialIssueError)
+			assert.Empty(t, resp.TransactionID, "no document should have been issued")
+			assert.Empty(t, resp.CredentialOfferURL)
+		})
+	}
 }
 
 // idScanServerStub returns an httptest.Server standing in for the FaceTec

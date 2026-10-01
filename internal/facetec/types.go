@@ -49,18 +49,20 @@ type IDScanResult struct {
 	NFCVerified     bool         `json:"nfcVerified"`
 	BarcodeVerified bool         `json:"barcodeVerified"`
 	MRZVerified     bool         `json:"mrzVerified"`
-	// NFCSkipped is true when the user declined the NFC chip read step
-	// (idScanResultsSoFar.nfcStatusEnumInt == NFC_REQUESTED_BUT_USER_PRESSED_SKIP,
-	// confirmed empirically against a live FaceTec Server response). Only
-	// ever set by ExtractScanResult (the /process-request path); always
-	// false for the legacy /match-3d-3d JSON-decoded path.
-	NFCSkipped bool `json:"nfcSkipped"`
+	// NFCStatus is idScanResultsSoFar.nfcStatusEnumInt: why the chip was or
+	// was not read (see the NFCStatus* constants). It only says whether a
+	// read happened; NFCVerified says whether the chip was authenticated.
+	// Only set by ExtractScanResult (the /process-request path). The legacy
+	// /match-3d-3d response has no such field and never reads this one,
+	// hence json:"-" rather than a zero value that would read as
+	// NFCStatusNotSpecifiedByTemplate.
+	NFCStatus int `json:"-"`
 
 	// ChipAuthStatus is FaceTec's nfcAuthenticationStatusEnumInt: 0 N/A,
-	// 1 NOT_SUPPORTED_BY_DOCUMENT (no AA/CA on the chip: permitted but a
-	// weaker clone-detection signal), 2 NOT_SUPPORTED_BY_SDK, 3 FAILED,
-	// 4 AUTHENTICATED, 5 FAILED_DUE_TO_SIGNATURE_VERIFICATION. 3 and 5 are a
-	// hard reject. Only set by ExtractScanResult.
+	// 1 NOT_SUPPORTED_BY_DOCUMENT (no AA/CA on the chip), 2 NOT_SUPPORTED_BY_SDK,
+	// 3 FAILED, 4 AUTHENTICATED, 5 FAILED_DUE_TO_SIGNATURE_VERIFICATION. Only 4
+	// (NFCVerified) is accepted; 3 and 5 get the specific chip_auth_failed
+	// refusal. Only set by ExtractScanResult.
 	ChipAuthStatus int `json:"chipAuthStatus"`
 	// ChipTrusted is true only when facetec-api itself verified the SOD and
 	// data-group hashes AND the go-trust PDP trusts the DSC for the issuing
@@ -82,6 +84,30 @@ type IDScanResult struct {
 	// It is what the SOD can vouch for once DG2's hash has been verified.
 	ChipPortrait string `json:"-"`
 }
+
+// FaceTec Server v10 nfcStatusEnumInt values. USER_PRESSED_SKIP and SUCCESS
+// were confirmed empirically against a live FaceTec Server response: a
+// completed session where NFC was skipped reports nfcStatusEnumInt=2 and
+// nfcAuthenticationStatusEnumInt=0, vs. 4 and 4 when the chip is read and
+// authenticated.
+const (
+	// NFCStatusUnknown means the response carried no nfcStatusEnumInt.
+	NFCStatusUnknown = -1
+	// NFCStatusNotSpecifiedByTemplate: the document's template requests no
+	// NFC read, so the user is never prompted for one.
+	NFCStatusNotSpecifiedByTemplate = 0
+	// NFCStatusDeviceNotCapable: the device cannot read NFC (possibly
+	// because NFC is switched off), so the user is never prompted.
+	NFCStatusDeviceNotCapable = 1
+	// NFCStatusUserSkipped: the user was prompted and pressed skip.
+	NFCStatusUserSkipped = 2
+	// NFCStatusChipError: the read was attempted but the chip could not be
+	// accessed.
+	NFCStatusChipError = 3
+	// NFCStatusSuccess: the chip was read. Whether it was also authenticated
+	// is NFCVerified.
+	NFCStatusSuccess = 4
+)
 
 // DocumentData contains the OCR-extracted identity fields from the scanned document.
 // This is the only data from a scan that may leave the facetec-api security zone.

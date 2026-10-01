@@ -215,75 +215,124 @@ func TestEvaluateScan_BoundaryLiveness_ExactThreshold(t *testing.T) {
 	}
 }
 
-// defaultRulesDir points at the shipped rules/ directory.
-const defaultRulesDir = "../../rules"
-
-func passportScan(chipTrusted bool) facetec.ScanResult {
+// scan builds a scan; chipTrusted is the PDP-backed passive authentication
+// result, nfc is FaceTec's own chip authentication (status 4).
+func scan(docType string, mrz, nfc, barcode, chipTrusted bool) facetec.ScanResult {
 	return facetec.ScanResult{
-		Liveness: facetec.LivenessCheckResult{LivenessScore: 1.0},
+		Liveness: facetec.LivenessCheckResult{LivenessScore: 0.95},
 		IDScan: facetec.IDScanResult{
-			FaceMatchLevel: 9,
-			DocumentData:   facetec.DocumentData{DocumentType: "passport"},
-			MRZVerified:    true,
-			NFCVerified:    true,
-			ChipTrusted:    chipTrusted,
+			FaceMatchLevel:  8,
+			DocumentData:    facetec.DocumentData{DocumentType: docType},
+			MRZVerified:     mrz,
+			NFCVerified:     nfc,
+			BarcodeVerified: barcode,
+			ChipTrusted:     chipTrusted,
 		},
 	}
 }
 
-// TestDefaultRules_PassportRequiresChipTrusted proves the shipped rule set
-// only accepts a passport whose chip the PDP trusted, whatever FaceTec's own
-// nfc-verified says.
-func TestDefaultRules_PassportRequiresChipTrusted(t *testing.T) {
-	e, err := New(defaultRulesDir)
+// TestDefaultRules_AcceptRequireAuthenticatedChip loads the shipped
+// rules/default.spoc: no document is accepted without an authenticated NFC
+// chip (#65), and passports additionally need a PDP-trusted chip, so
+// passports need BOTH nfc-verified and chip-trusted while ID cards and
+// driving licences need nfc-verified only.
+func TestDefaultRules_AcceptRequireAuthenticatedChip(t *testing.T) {
+	e, err := New(filepath.Join("..", "..", "rules"))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	if err := e.EvaluateScan(passportScan(true)); err != nil {
-		t.Errorf("trusted chip: expected acceptance, got %v", err)
+
+	accepted := map[string]facetec.ScanResult{
+		"passport with MRZ, chip authenticated and trusted": scan("passport", true, true, false, true),
+		"passport, barcode also verified":                   scan("passport", true, true, true, true),
+		"ID card with chip":                                 scan("id_card", true, true, false, false),
+		"ID card with chip, MRZ not verified":               scan("id_card", false, true, false, false),
+		"ID card with chip, trusted too":                    scan("id_card", true, true, false, true),
+		"driving licence with chip":                         scan("dl", false, true, false, false),
 	}
-	if err := e.EvaluateScan(passportScan(false)); err == nil {
-		t.Error("untrusted chip: expected rejection (nfc-verified alone must not suffice)")
+	for name, r := range accepted {
+		if err := e.EvaluateScan(r); err != nil {
+			t.Errorf("%s: want accepted, got %v", name, err)
+		}
 	}
-	// Positional placeholders accept any nfc/barcode value.
-	s := passportScan(true)
-	s.IDScan.NFCVerified, s.IDScan.BarcodeVerified = false, true
-	if err := e.EvaluateScan(s); err != nil {
-		t.Errorf("status 1 style scan (nfc-verified=false, chip-trusted=true): expected acceptance, got %v", err)
+
+	rejected := map[string]facetec.ScanResult{
+		"passport authenticated but chip not trusted":   scan("passport", true, true, false, false),
+		"passport trusted but chip not authenticated":   scan("passport", true, false, false, true),
+		"passport without chip":                         scan("passport", true, false, false, false),
+		"passport with both, MRZ not verified":          scan("passport", false, true, false, true),
+		"ID card without chip":                          scan("id_card", true, false, false, false),
+		"ID card trusted but not authenticated":         scan("id_card", true, false, false, true),
+		"driving licence with barcode, no chip":         scan("dl", false, false, true, false),
+		"driving licence trusted but not authenticated": scan("dl", false, false, false, true),
+		"unknown document with chip":                    scan("", true, true, true, true),
+	}
+	for name, r := range rejected {
+		if err := e.EvaluateScan(r); err == nil {
+			t.Errorf("%s: want rejected, got accepted", name)
+		}
 	}
 }
 
-// TestDefaultRules_OtherDocTypesUnchanged: id cards and driving licences keep
-// their existing acceptance rules.
-func TestDefaultRules_OtherDocTypesUnchanged(t *testing.T) {
-	e, err := New(defaultRulesDir)
+// TestDefaultRules_ReviewMirrorsAcceptRules queries the shipped
+// facetec-scan-review rules directly (EvaluateScan only asks the accept
+// head): a borderline scan -- below the accept thresholds, within review's --
+// is escalated under exactly the same chip conditions as acceptance.
+func TestDefaultRules_ReviewMirrorsAcceptRules(t *testing.T) {
+	e, err := New(filepath.Join("..", "..", "rules"))
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	card := passportScan(false)
-	card.IDScan.DocumentData.DocumentType = "id_card"
-	if err := e.EvaluateScan(card); err != nil {
-		t.Errorf("id_card: %v", err)
+
+	borderline := func(docType string, mrz, nfc, barcode, trusted bool) facetec.ScanResult {
+		r := scan(docType, mrz, nfc, barcode, trusted)
+		r.Liveness.LivenessScore = 0.70
+		r.IDScan.FaceMatchLevel = 5
+		return r
 	}
-	dl := passportScan(false)
-	dl.IDScan.DocumentData.DocumentType = "dl"
-	dl.IDScan.MRZVerified, dl.IDScan.NFCVerified, dl.IDScan.BarcodeVerified = false, false, true
-	if err := e.EvaluateScan(dl); err != nil {
-		t.Errorf("dl: %v", err)
+	review := func(r facetec.ScanResult) bool {
+		return e.engine.QueryElement(buildQuery(reviewHead, r))
+	}
+
+	if err := e.EvaluateScan(borderline("passport", true, true, false, true)); err == nil {
+		t.Fatal("a borderline scan must not pass the accept rules, or this test proves nothing")
+	}
+
+	escalated := map[string]facetec.ScanResult{
+		"passport with MRZ, chip authenticated and trusted": borderline("passport", true, true, false, true),
+		"ID card with chip":         borderline("id_card", false, true, false, false),
+		"driving licence with chip": borderline("dl", false, true, false, false),
+	}
+	for name, r := range escalated {
+		if !review(r) {
+			t.Errorf("%s: want escalated for review", name)
+		}
+	}
+
+	notEscalated := map[string]facetec.ScanResult{
+		"passport authenticated but not trusted": borderline("passport", true, true, false, false),
+		"passport trusted but not authenticated": borderline("passport", true, false, false, true),
+		"passport without chip":                  borderline("passport", true, false, false, false),
+		"ID card without chip":                   borderline("id_card", true, false, false, false),
+		"driving licence with barcode, no chip":  borderline("dl", false, false, true, false),
+	}
+	for name, r := range notEscalated {
+		if review(r) {
+			t.Errorf("%s: want not escalated", name)
+		}
 	}
 }
 
-func TestBuildQueryElement_ChipTrustedIsLastField(t *testing.T) {
+func TestBuildQuery_ChipTrustedIsLastField(t *testing.T) {
 	dir := writeRules(t, "(facetec-scan (liveness-score (* range numeric ge 000)) (face-match-level (* range numeric ge 00)) (doc-type passport) (mrz-verified false) (nfc-verified false) (barcode-verified false) (chip-trusted false))\n")
 	e, err := New(dir)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	if err := e.EvaluateScan(passportScan(false)); err == nil {
-		// passportScan sets mrz/nfc true, so this must NOT match the all-false rule
-		t.Error("expected mismatch")
+	if err := e.EvaluateScan(scan("passport", true, true, false, false)); err == nil {
+		t.Error("mrz/nfc true must NOT match the all-false rule")
 	}
-	s := facetec.ScanResult{IDScan: facetec.IDScanResult{DocumentData: facetec.DocumentData{DocumentType: "passport"}}}
+	s := scan("passport", false, false, false, false)
 	if err := e.EvaluateScan(s); err != nil {
 		t.Errorf("all-false scan should match: %v", err)
 	}

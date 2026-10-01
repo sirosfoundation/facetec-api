@@ -83,26 +83,18 @@ func process(t *testing.T, c *Client, ctx context.Context) *facetec.ProcessReque
 	return resp
 }
 
-func TestProcessRequest_ChipAuthFailedIsHardReject(t *testing.T) {
-	for _, status := range []int{facetec.ChipAuthFailed, facetec.ChipAuthFailedSignature} {
+// Only FaceTec chip authentication status 4 passes the gate; every other
+// status (including 1, no AA/CA on the chip, and the failures 3 and 5) is
+// refused before trust is consulted, even for a fully trusted chip.
+func TestProcessRequest_ChipAuthStatusNot4IsRefusedBeforeTrust(t *testing.T) {
+	for _, status := range []int{0, 1, 2, 3, 5} {
 		chip := emrtdtest.New(emrtdtest.Options{})
-		// Even a fully trusted chip and non-required trust cannot save it.
 		pdp := &fakeEvaluator{dec: emrtd.TrustDecision{Trusted: true, CSCASHA256: "aa"}}
 		c, ctx := chipClient(t, chipPayload(t, chip, status, true), pdp, false)
 		resp := process(t, c, ctx)
-		assert.Equal(t, string(idverrors.CodeChipAuthFailed), resp.CredentialIssueErrCode, "status %d", status)
-		assert.Equal(t, 0, pdp.calls, "PDP is not consulted for a chip FaceTec already failed")
+		assert.Equal(t, string(idverrors.CodeNFCNotAuthenticated), resp.CredentialIssueErrCode, "status %d", status)
+		assert.Equal(t, 0, pdp.calls, "PDP is not consulted without an authenticated chip (status %d)", status)
 	}
-}
-
-func TestProcessRequest_ChipAuthStatus1IsPermitted(t *testing.T) {
-	chip := emrtdtest.New(emrtdtest.Options{})
-	pdp := &fakeEvaluator{dec: emrtd.TrustDecision{Trusted: true, CSCASHA256: "aa"}}
-	c, ctx := chipClient(t, chipPayload(t, chip, 1, true), pdp, true)
-	resp := process(t, c, ctx)
-	// Passed the chip gates; rejected only by the always-rejecting test policy.
-	assert.Equal(t, string(idverrors.CodePolicyRejected), resp.CredentialIssueErrCode)
-	assert.Equal(t, 1, pdp.calls)
 }
 
 func TestProcessRequest_RequiredUntrustedChipRejected(t *testing.T) {
@@ -143,13 +135,14 @@ func TestProcessRequest_NotRequiredUntrustedChipLeftToPolicy(t *testing.T) {
 	assert.Equal(t, string(idverrors.CodePolicyRejected), resp.CredentialIssueErrCode)
 }
 
-func TestProcessRequest_NoChipDataLeftToPolicyEvenWhenRequired(t *testing.T) {
+// A chip-less scan (no authentication status) is refused by the NFC gate
+// before trust is consulted, whether or not trust.required is set.
+func TestProcessRequest_NoChipRefusedByNFCGateBeforeTrust(t *testing.T) {
 	chip := emrtdtest.New(emrtdtest.Options{})
 	pdp := &fakeEvaluator{}
 	c, ctx := chipClient(t, chipPayload(t, chip, 0, false), pdp, true)
 	resp := process(t, c, ctx)
-	assert.Equal(t, string(idverrors.CodePolicyRejected), resp.CredentialIssueErrCode,
-		"doc types without a chip (e.g. dl) are governed by SPOCP rules; the passport rule demands chip-trusted")
+	assert.Equal(t, string(idverrors.CodeNFCNotAuthenticated), resp.CredentialIssueErrCode)
 	assert.Equal(t, 0, pdp.calls)
 }
 
@@ -273,4 +266,15 @@ func TestAssessChip_RequiredRejectsMalformedRawData(t *testing.T) {
 	err := c.assessChip(t.Context(), scan)
 	require.NotNil(t, err)
 	assert.Equal(t, idverrors.CodeChipUntrusted, err.Code)
+}
+
+// Status 4 passes the NFC gate; with trust.required, missing raw chip data
+// (nothing for passive authentication) is then refused as chip_untrusted.
+func TestProcessRequest_Status4WithoutRawChipDataRefusedWhenRequired(t *testing.T) {
+	chip := emrtdtest.New(emrtdtest.Options{})
+	pdp := &fakeEvaluator{}
+	c, ctx := chipClient(t, chipPayload(t, chip, 4, false), pdp, true)
+	resp := process(t, c, ctx)
+	assert.Equal(t, string(idverrors.CodeChipUntrusted), resp.CredentialIssueErrCode)
+	assert.Equal(t, 0, pdp.calls)
 }

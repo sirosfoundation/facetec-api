@@ -23,14 +23,27 @@ const (
 	// (FaceTec Server's nfcStatusEnumInt == NFC_REQUESTED_BUT_USER_PRESSED_SKIP),
 	// so the assurance level required for issuance was not met.
 	CodeNFCSkipped Code = "nfc_skipped"
-	// CodeChipAuthFailed indicates FaceTec reported a failed chip
-	// authentication (nfcAuthenticationStatusEnumInt 3 or 5): the chip looks
-	// cloned or its signature did not verify.
-	CodeChipAuthFailed Code = "chip_auth_failed"
 	// CodeChipUntrusted indicates the eMRTD chip data could not be verified
 	// against a trusted document signer and the deployment requires that
 	// (trust.required).
 	CodeChipUntrusted Code = "chip_untrusted"
+	// CodeNFCNotRequested indicates FaceTec's template for the detected
+	// document did not request an NFC read (nfcStatusEnumInt ==
+	// NO_NFC_SPECIFIED_BY_TEMPLATE), so the user was never prompted. It does
+	// not establish that the document has no chip -- only that FaceTec does
+	// not read one for this document type.
+	CodeNFCNotRequested Code = "nfc_not_requested"
+	// CodeNFCDeviceNotCapable indicates the device could not read NFC
+	// (nfcStatusEnumInt == NFC_REQUESTED_BUT_DEVICE_NOT_CAPABLE), e.g. no NFC
+	// hardware or NFC switched off.
+	CodeNFCDeviceNotCapable Code = "nfc_device_not_capable"
+	// CodeNFCChipReadFailed indicates the chip read was attempted but failed
+	// (nfcStatusEnumInt == NFC_REQUESTED_BUT_ERROR_ACCESSING_CHIP).
+	CodeNFCChipReadFailed Code = "nfc_chip_read_failed"
+	// CodeNFCNotAuthenticated indicates the chip was not authenticated
+	// (nfcAuthenticationStatusEnumInt != AUTHENTICATED), including a chip that
+	// was read but failed authentication.
+	CodeNFCNotAuthenticated Code = "nfc_not_authenticated"
 	// CodeIssuanceFailed indicates credential issuance failed after successful verification.
 	CodeIssuanceFailed Code = "issuance_failed"
 	// CodeInternalError indicates an unexpected internal error.

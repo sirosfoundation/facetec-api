@@ -171,7 +171,7 @@ func (c *Client) SubmitIDScan(ctx context.Context, livenessSessionID string, idS
 		return "", "", fmt.Errorf("id-scan: tenant context missing from request")
 	}
 
-	// Same hard gate as ProcessRequest's NFCSkipped check, adapted to this
+	// Same hard gate as ProcessRequest's nfcRejection check, adapted to this
 	// legacy path's response shape. FaceTec's /match-3d-3d response (decoded
 	// directly into IDScanResult) only carries a plain NFCVerified bool, with
 	// no equivalent to /process-request's nfcStatusEnumInt that would let us
@@ -254,17 +254,19 @@ func (c *Client) ProcessRequest(ctx context.Context, req *facetec.ProcessRequest
 		return resp, nil
 	}
 
-	// Hard gate, independent of per-tenant SPOCP policy thresholds: a user
-	// who was prompted for the NFC chip read and declined it did not reach
-	// the assurance level this credential requires, regardless of how well
-	// the rest of the scan (face match, MRZ, etc.) scored.
-	if scanResult.IDScan.NFCSkipped {
-		c.log.Info("process-request scan rejected: NFC was skipped",
+	// Hard gate, independent of per-tenant SPOCP policy thresholds: nothing
+	// is issued unless the document's chip was read and authenticated,
+	// whatever the reason it was not (never prompted, skipped, read error),
+	// and regardless of how well the rest of the scan scored.
+	if code, msg, rejected := nfcRejection(scanResult.IDScan); rejected {
+		c.log.Info("process-request scan rejected: NFC chip not authenticated",
 			zap.String("tenant", tc.ID),
 			zap.String("doc_type", scanResult.IDScan.DocumentData.DocumentType),
+			zap.Int("nfc_status", scanResult.IDScan.NFCStatus),
+			zap.String("code", string(code)),
 		)
-		resp.CredentialIssueError = "NFC verification was skipped"
-		resp.CredentialIssueErrCode = string(idverrors.CodeNFCSkipped)
+		resp.CredentialIssueError = msg
+		resp.CredentialIssueErrCode = string(code)
 		return resp, nil
 	}
 
@@ -312,6 +314,27 @@ func (c *Client) ProcessRequest(ctx context.Context, req *facetec.ProcessRequest
 	resp.TransactionID = docID
 	resp.CredentialOfferURL = offerURL
 	return resp, nil
+}
+
+// nfcRejection reports why a scan without an authenticated chip is refused,
+// or rejected=false when the chip was authenticated. The code tells the
+// client what the user can do about it.
+func nfcRejection(r facetec.IDScanResult) (code idverrors.Code, msg string, rejected bool) {
+	if r.NFCVerified {
+		return "", "", false
+	}
+	switch r.NFCStatus {
+	case facetec.NFCStatusNotSpecifiedByTemplate:
+		return idverrors.CodeNFCNotRequested, "no NFC chip read was requested for this document", true
+	case facetec.NFCStatusDeviceNotCapable:
+		return idverrors.CodeNFCDeviceNotCapable, "the device could not read the NFC chip", true
+	case facetec.NFCStatusUserSkipped:
+		return idverrors.CodeNFCSkipped, "NFC verification was skipped", true
+	case facetec.NFCStatusChipError:
+		return idverrors.CodeNFCChipReadFailed, "the NFC chip could not be read", true
+	default:
+		return idverrors.CodeNFCNotAuthenticated, "the NFC chip was not authenticated", true
+	}
 }
 
 // RedeemOffer retrieves and atomically removes a credential offer by transaction ID.

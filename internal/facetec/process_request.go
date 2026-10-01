@@ -36,17 +36,6 @@ type ProcessRequestResponse struct {
 // 3 = USER_CONFIRM, 5 = NFC.
 const photoIDNextStepComplete = 4
 
-// nfcStatusUserSkipped is the value of idScanResultsSoFar.nfcStatusEnumInt
-// meaning the user was prompted for the NFC chip read and declined it.
-// Confirmed empirically against a live FaceTec Server response (not just
-// from FaceTec's docs): a completed session where NFC was skipped reports
-// nfcStatusEnumInt=2 and nfcAuthenticationStatusEnumInt=0, vs. 4 and 4
-// respectively when NFC is read and authenticated successfully.
-// Other documented values: 0 = NO_NFC_SPECIFIED_BY_TEMPLATE,
-// 1 = NFC_REQUESTED_BUT_DEVICE_NOT_CAPABLE,
-// 3 = NFC_REQUESTED_BUT_ERROR_ACCESSING_CHIP, 4 = SUCCESS.
-const nfcStatusUserSkipped = 2
-
 // ExtractScanResult translates a successful FaceTec Server v10 process-request
 // response into the internal ScanResult shape used by policy evaluation and
 // issuance. It returns ok=false when the payload does not yet represent a
@@ -65,7 +54,7 @@ const nfcStatusUserSkipped = 2
 //   - idScanResultsSoFar.matchLevel (int) for face match confidence
 //   - idScanResultsSoFar.mrzStatusEnumInt (int) — 2 = SUCCESS
 //   - idScanResultsSoFar.nfcAuthenticationStatusEnumInt (int) — 4 = AUTHENTICATED
-//   - idScanResultsSoFar.nfcStatusEnumInt (int) — 2 = user skipped NFC (see nfcStatusUserSkipped)
+//   - idScanResultsSoFar.nfcStatusEnumInt (int) — why the chip was or was not read (see NFCStatus*)
 //   - idScanResultsSoFar.barcodeStatusEnumInt (int) — 3 = SUCCESS
 //   - documentData (object or JSON string) inside idScanResultsSoFar
 func ExtractScanResult(payload map[string]any) (*ScanResult, bool, error) {
@@ -137,16 +126,16 @@ func ExtractScanResult(payload map[string]any) (*ScanResult, bool, error) {
 		return nil, false, fmt.Errorf("facetec: barcodeStatusEnumInt: %w", err)
 	}
 
-	// nfcStatusEnumInt directly drives the NFCSkipped hard issuance gate
-	// (see nfcStatusUserSkipped below), unlike the other status enums above,
-	// which only ever feed into SPOCP policy scoring. A parse error here
-	// (as opposed to the field simply being absent, which is tolerated and
-	// treated as "not skipped") must not be silently swallowed into 0/false --
-	// that would fail open, letting a scan with an unreadable NFC status
-	// through as if NFC had never been skipped.
-	nfcStatus, _, err := lookupEnumInt(results["nfcStatusEnumInt"])
+	// nfcStatusEnumInt only selects which rejection a scan without an
+	// authenticated chip gets (the issuance gate itself is NFCVerified), but
+	// a value that is present and unreadable is still an error rather than
+	// silently becoming "unknown".
+	nfcStatus, ok, err := lookupEnumInt(results["nfcStatusEnumInt"])
 	if err != nil {
 		return nil, false, fmt.Errorf("facetec: nfcStatusEnumInt: %w", err)
+	}
+	if !ok {
+		nfcStatus = NFCStatusUnknown
 	}
 
 	// documentData.Portrait is normally already populated by
@@ -175,7 +164,7 @@ func ExtractScanResult(payload map[string]any) (*ScanResult, bool, error) {
 			DocumentData:    documentData,
 			MRZVerified:     mrzStatus == 2,
 			NFCVerified:     nfcAuthStatus == 4,
-			NFCSkipped:      nfcStatus == nfcStatusUserSkipped,
+			NFCStatus:       nfcStatus,
 			BarcodeVerified: barcodeStatus == 3,
 			ChipAuthStatus:  nfcAuthStatus,
 			ChipRaw:         extractNFCRawData(results["documentData"]),
@@ -304,21 +293,6 @@ func parseFaceTecGroupedFields(m map[string]any) (DocumentData, bool, error) {
 		Portrait:       extractPortraitFromDG2(m),
 	}
 	return dd, true, nil
-}
-
-// NFC chip authentication status values (nfcAuthenticationStatusEnumInt) that
-// mean the chip failed clone detection or signature verification.
-const (
-	// ChipAuthFailed is NFC_AUTHENTICATION_FAILED.
-	ChipAuthFailed = 3
-	// ChipAuthFailedSignature is NFC_AUTHENTICATION_FAILED_DUE_TO_SIGNATURE_VERIFICATION.
-	ChipAuthFailedSignature = 5
-)
-
-// ChipAuthStatusFailed reports whether a nfcAuthenticationStatusEnumInt value
-// is one of the failure states, which is a hard reject.
-func ChipAuthStatusFailed(status int) bool {
-	return status == ChipAuthFailed || status == ChipAuthFailedSignature
 }
 
 // extractNFCRawData returns documentData.nfcValues.rawData as a string map

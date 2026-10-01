@@ -51,9 +51,8 @@ type Record struct {
 	// which is FaceTec's own chip check).
 	ChipTrusted     bool   `json:"chip_trusted"`
 	ChipTrustReason string `json:"chip_trust_reason,omitempty"`
-	// ChipAuthStatus is FaceTec's nfcAuthenticationStatusEnumInt. 1
-	// (NOT_SUPPORTED_BY_DOCUMENT: no AA/CA on the chip) is accepted but is a
-	// weaker clone-detection signal; it is recorded here as evidence.
+	// ChipAuthStatus is FaceTec's nfcAuthenticationStatusEnumInt; issued
+	// credentials always carry 4 (AUTHENTICATED). Recorded here as evidence.
 	ChipAuthStatus  int    `json:"chip_auth_status"`
 	ChipDSCSHA256   string `json:"chip_dsc_sha256,omitempty"`
 	ChipCSCASHA256  string `json:"chip_csca_sha256,omitempty"`

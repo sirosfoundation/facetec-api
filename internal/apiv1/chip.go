@@ -25,24 +25,16 @@ func newChipChecker(cfg config.TrustConfig) *emrtd.Checker {
 
 // assessChip performs eMRTD passive authentication on the scan's chip data and
 // records the outcome in scan.IDScan (ChipTrusted, ChipTrustReason and the
-// certificate fingerprints). It returns a non-nil *idverrors.Error when the
-// scan must be rejected regardless of the SPOCP policy:
-//
-//   - FaceTec reported a failed chip authentication (status 3 or 5), or
-//   - trust.required is set and chip evidence (a non-zero chip auth status or
-//     any raw chip data or FaceTec NFC verification) was presented but is not trusted.
-//
-// Status 1 (NOT_SUPPORTED_BY_DOCUMENT: no AA/CA on the chip) is permitted: it
-// is a weaker clone-detection signal and is surfaced in the audit log through
-// ChipAuthStatus, not a rejection.
+// certificate fingerprints). It runs only after the NFC gate (nfcRejection)
+// has established that FaceTec authenticated the chip (status 4: clone
+// detection via AA/CA and FaceTec's own signature verification), so a chip-less
+// scan or any other status is refused before trust is even consulted. It
+// returns a non-nil *idverrors.Error when trust.required is set and the chip
+// evidence (raw chip data or FaceTec NFC verification) is not trusted. Whether
+// an untrusted chip is otherwise acceptable is left to the SPOCP policy
+// (chip-trusted).
 func (c *Client) assessChip(ctx context.Context, scan *facetec.ScanResult) *idverrors.Error {
 	id := &scan.IDScan
-	if facetec.ChipAuthStatusFailed(id.ChipAuthStatus) {
-		id.ChipTrusted = false
-		id.ChipTrustReason = "facetec_chip_auth_failed"
-		return idverrors.New(idverrors.CodeChipAuthFailed, "chip authentication failed")
-	}
-
 	dd := id.DocumentData
 	out := c.chip.Check(ctx, id.ChipRaw, emrtd.Claimed{
 		GivenName:      dd.GivenName,

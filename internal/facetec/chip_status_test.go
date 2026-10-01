@@ -4,14 +4,6 @@ import (
 	"testing"
 )
 
-func TestChipAuthStatusFailed(t *testing.T) {
-	for status, want := range map[int]bool{0: false, 1: false, 2: false, 3: true, 4: false, 5: true} {
-		if got := ChipAuthStatusFailed(status); got != want {
-			t.Errorf("ChipAuthStatusFailed(%d) = %v, want %v", status, got, want)
-		}
-	}
-}
-
 func TestExtractScanResult_ChipAuthStatus(t *testing.T) {
 	for _, status := range []float64{0, 1, 2, 3, 4, 5} {
 		p := realPayload()

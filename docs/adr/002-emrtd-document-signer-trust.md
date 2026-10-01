@@ -37,12 +37,23 @@ bodies and denials all mean NOT trusted.
 
 The outcome is surfaced to SPOCP as `chip-trusted` (last query field), independent of
 `nfc-verified`, and recorded in the audit log together with `chip_auth_status`. The default
-passport rule requires `(chip-trusted true)`. Independent of policy, status 3 or 5 is rejected in
-code, and with `trust.required` (default true) any scan that presented chip data which is not
-trusted is rejected and the service refuses to start without `trust.pdp_url`.
+passport rules (accept and review) require **both** `(nfc-verified true)` and `(chip-trusted true)`;
+ID cards and driving licences require `(nfc-verified true)` only.
 
-Status 1 (no Active/Chip Authentication on the chip) is permitted: many genuine passports lack
-it. It is a weaker clone-detection signal and is recorded in the audit log so it can be reviewed.
+The two checks answer different questions. FaceTec status 4 (AUTHENTICATED) proves clone
+detection succeeded (Active/Chip Authentication) and that FaceTec's signature verification
+passed, i.e. the chip is genuine hardware holding unaltered data. `chip-trusted` proves the DSC
+chains to our reviewed CSCA list. Neither implies the other: a forger's own chip can be
+authentic-looking but untrusted, and a copied genuine SOD fails clone detection.
+
+Independent of policy, `/process-request` requires status 4 for every document type and refuses
+anything else (`nfc_not_authenticated`, or the more specific `nfc_*` codes) before trust is even
+consulted; failed authentication (3, 5) is covered by that refusal. With `trust.required`
+(default true) a scan that passes that gate but whose raw chip data is missing or untrusted is
+rejected (`chip_untrusted`), and the service refuses to start without `trust.pdp_url`.
+
+Known trade-off: many genuine passports lack Active/Chip Authentication (status 1). Under this
+rule they are refused by design, accepting reduced coverage for clone resistance.
 
 ## Consequences
 
@@ -53,4 +64,4 @@ it. It is a weaker clone-detection signal and is recorded in the audit log so it
   DG must be covered by the SOD, document number and both dates must be present in the scan), so
   some malformed-but-genuine chips are refused rather than waved through.
 - The legacy `/v1/id-scan` path carries no raw chip data, so `chip-trusted` is always false there
-  and the default passport rule rejects it.
+  and the default passport rule rejects it (with `trust.required`, the path is refused outright).
