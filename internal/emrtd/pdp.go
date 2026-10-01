@@ -27,8 +27,11 @@ const (
 	retryBackoff   = 100 * time.Millisecond
 )
 
-// TrustRequest is what the PEP asks the PDP. It carries certificates and a
-// country code only: no personal data and no SOD.
+// TrustRequest is what the PEP asks the PDP: the SOD's certificates, the
+// issuing-state code and optionally the SOD signing time. The signing time is
+// document-specific, personal-data-adjacent metadata and the (unvalidated)
+// certificates are attacker-controlled input (PRIVACY.md 5.3). No SOD, data
+// group, MRZ field or biometric data is sent.
 type TrustRequest struct {
 	// IssuingState is the ISO 3166-1 alpha-3 code (subject.id).
 	IssuingState string
@@ -96,7 +99,7 @@ func (p *PDPClient) EvaluateDSC(ctx context.Context, req TrustRequest) (TrustDec
 		Action:   authzenclient.NewAction(ActionDocumentSigner),
 	}
 	if req.SigningTime != nil {
-		ar.Context = map[string]interface{}{"signing_time": req.SigningTime.UTC().Format(time.RFC3339)}
+		ar.Context = map[string]interface{}{"signing_time": req.SigningTime.UTC().Format(time.RFC3339Nano)}
 	}
 
 	var lastErr error

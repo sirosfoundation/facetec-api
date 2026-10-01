@@ -59,7 +59,7 @@ rule they are refused by design, accepting reduced coverage for clone resistance
 
 - Passports from states without a reviewed CSCA are rejected until an anchor is approved.
 - The PDP is on the issuance path: its availability bounds passport issuance (fails closed).
-- The PDP sees only certificates and a country code (see PRIVACY.md §5.3).
+- The PDP sees only the SOD certificates, the issuing-state code and the document-specific SOD signing time, which is personal-data-adjacent metadata (see PRIVACY.md §5.3).
 - Local checks are deliberately strict (exactly one SignerInfo, DG1 mandatory, every presented
   DG must be covered by the SOD, document number and both dates must be present in the scan), so
   some malformed-but-genuine chips are refused rather than waved through.

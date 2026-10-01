@@ -186,7 +186,7 @@ other party receives it.
 
 **Retention.** facetec-api keeps none of it: the chip data and the request are processed in
 memory only, exactly like the rest of the scan, and only the outcome (`chip_trusted`, a reason
-code and certificate fingerprints) is written to the audit log; the signing time itself is not
+code, FaceTec's `chip_auth_status` and the DSC/CSCA fingerprints) is written to the audit log; the signing time itself is not
 logged. The PDP must not persist request bodies; any PDP access logging that includes the
 signing time is retained no longer than the PDP's operational log retention and must be covered
 by the same retention schedule.

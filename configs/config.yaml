@@ -72,7 +72,9 @@ policy:
 # ── eMRTD document-signer trust (go-trust PDP) ────────────────────────────────
 # Passport chips are verified locally (SOD signature, data-group hashes, DG1 vs
 # scan) and the Document Signer Certificate is then checked by a go-trust PDP
-# against a reviewed CSCA list. Only certificates and a country code are sent.
+# against a reviewed CSCA list. Sent: the SOD's certificates, the issuing-state
+# code and the SOD signing time (document-specific, personal-data-adjacent
+# metadata; see PRIVACY.md 5.3). No SOD, data groups, MRZ or biometrics.
 trust:
   # pdp_url: "https://go-trust.example.org"
   timeout: "5s"

@@ -34,6 +34,21 @@ func pdpServer(t *testing.T, hits *atomic.Int32, handler http.HandlerFunc) *PDPC
 	return NewPDPClient(srv.URL, 500*time.Millisecond)
 }
 
+func TestPDP_SigningTimeKeepsFractionalSeconds(t *testing.T) {
+	var hits atomic.Int32
+	var got map[string]any
+	p := pdpServer(t, &hits, func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&got)
+		_, _ = w.Write([]byte(`{"decision":false}`))
+	})
+	req := sampleRequest()
+	st := time.Date(2026, 9, 30, 10, 0, 0, 500_000_000, time.UTC)
+	req.SigningTime = &st
+	_, err := p.EvaluateDSC(t.Context(), req)
+	require.NoError(t, err)
+	assert.Equal(t, map[string]any{"signing_time": "2026-09-30T10:00:00.5Z"}, got["context"])
+}
+
 func TestPDP_AllowAndRequestShape(t *testing.T) {
 	var hits atomic.Int32
 	var got map[string]any
