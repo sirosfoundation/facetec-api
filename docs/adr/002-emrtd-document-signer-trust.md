@@ -26,7 +26,7 @@ Split the work across three roles (shared contract for the emrtd effort):
 
 The PEP calls `POST /evaluation` (AuthZEN) with subject `{key, <alpha-3>}`, resource
 `{x5c, <alpha-3>, [DSC, other SOD certs...]}`, action `emrtd-document-signer` and, when the SOD
-carries one, `context.signing_time`. Certificates from the SOD other than the DSC are untrusted
+carries one, `context.signing_time`. The signing time is document-specific (the time this holder's SOD was signed), so it is treated as personal-data-adjacent metadata (PRIVACY.md §5.3); it is sent at full precision because validity boundaries are exact to the second and truncating or omitting it could change a decision. Certificates from the SOD other than the DSC are untrusted
 intermediates, never anchors. The signer-asserted `signing_time` is signed by the DSC itself and so
 is attacker-controlled when a DSC key is expired or compromised; the PEP therefore only forwards it
 when it is not in the future (10 minute skew), not after the DG1-bound document expiry and not more

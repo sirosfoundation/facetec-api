@@ -154,18 +154,42 @@ inter-controller agreement is required.
 
 ### 5.3 go-trust PDP (eMRTD document-signer trust)
 
-For passports read over NFC, facetec-api asks a go-trust PDP (`trust.pdp_url`, operated by the
-same organisation) whether the chip's Document Signer Certificate chains to a reviewed CSCA. The
-request carries **only the X.509 certificates embedded in the SOD and an ISO 3166-1 alpha-3
-country code, plus optionally the SOD signing time**. For a genuine passport these are public
-data, identical for every passport signed by that DSC. No SOD, no data groups, no MRZ and no
-biometric data are sent. Until the PDP has validated the chain, however, the certificates are
-attacker-controlled input and a forged one could in principle carry arbitrary subject or SAN
-attributes; they are forwarded as received. The PDP must therefore be treated as receiving
-untrusted certificate metadata, and it is operated by the same organisation precisely so that it
-remains inside the same processing boundary and need not be assessed as a separate processor. The chip data itself (SOD, DG1, DG2) is processed in memory
-only, exactly like the rest of the scan, and only the outcome (`chip_trusted`, a reason code and
-certificate fingerprints) is written to the audit log.
+**Purpose.** For passports read over NFC, facetec-api asks a go-trust PDP whether the chip's
+Document Signer Certificate (DSC) chains to a reviewed Country Signing CA (CSCA).
+
+**What is sent.** Exactly three things, per passport scan:
+1. the DSC and any other X.509 certificates carried in the chip's SOD (in the order found);
+2. the ISO 3166-1 alpha-3 issuing-state code taken from the signed DG1;
+3. the SOD signing time (CMS `signingTime`), when the SOD carries one, at full precision.
+
+**What is not sent.** No SOD, no data groups (DG1, DG2), no MRZ fields, no name, date of birth,
+document number, portrait or other biometric data.
+
+**Personal-data assessment.** The certificates of a genuine passport are public and shared by
+every passport signed with that DSC. The signing time is different: it is the time at which
+*this holder's* SOD was signed, so it is document-specific and, combined with the DSC and the
+issuing state, narrows down which issuance batch and period the document belongs to. It must be
+treated as personal-data-adjacent metadata (it can contribute to singling out or linking a
+document), not as non-identifying, and the DPIA should record it as such. Certificates are also
+attacker-controlled input until the PDP has validated the chain, so a forged one could in
+principle carry arbitrary subject or SAN attributes; they are forwarded as received.
+
+**Why the exact time is kept.** The PDP validates the DSC chain at the SOD signing time, and
+certificate validity boundaries are exact to the second. Truncating the time (for example to the
+date) could flip a validity decision at a boundary, and omitting it would validate at "now",
+which wrongly denies genuine passports signed under a DSC that has since expired. The time is
+therefore sent unmodified; it is bounded locally for plausibility first (ADR-002).
+
+**Recipient.** Only the PDP configured in `trust.pdp_url` (HTTPS, no redirects followed), which
+is operated by the same organisation and is therefore inside the same processing boundary; no
+other party receives it.
+
+**Retention.** facetec-api keeps none of it: the chip data and the request are processed in
+memory only, exactly like the rest of the scan, and only the outcome (`chip_trusted`, a reason
+code and certificate fingerprints) is written to the audit log; the signing time itself is not
+logged. The PDP must not persist request bodies; any PDP access logging that includes the
+signing time is retained no longer than the PDP's operational log retention and must be covered
+by the same retention schedule.
 
 ### 5.4 No other sub-processors
 

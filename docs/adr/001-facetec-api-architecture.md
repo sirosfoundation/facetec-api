@@ -89,19 +89,16 @@ liveness, and ID-scan steps.
 
 Scan results are expressed as SPOCP S-expressions:
 
-```
-(facetec-scan
-  (liveness-score "97")
-  (face-match-level "8")
-  (doc-type "passport")
-  (mrz-verified "true")
-  (nfc-verified "false"))
+```scheme
+(facetec-scan (liveness-score 097) (face-match-level 08) (doc-type passport) (mrz-verified true) (nfc-verified false) (barcode-verified false) (chip-trusted false))
 ```
 
-A permissive rule accepting any passport scan with liveness ≥ 80 and face match ≥ 6:
+Matching is positional: a rule lists the fields in this order and may stop early, but never skips
+one. Numbers are zero-padded (liveness 3 digits, face match 2 digits) so range predicates compare
+correctly. A permissive rule accepting any passport scan with liveness ≥ 80 and face match ≥ 6:
 
-```
-(facetec-scan (liveness-score "80") (face-match-level "6") (doc-type "passport"))
+```scheme
+(facetec-scan (liveness-score (* range numeric ge 080)) (face-match-level (* range numeric ge 06)) (doc-type passport))
 ```
 
 SPOCP's "less permissive" semantics mean a rule fires when the rule is less specific than the

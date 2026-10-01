@@ -277,15 +277,18 @@ the shipped rules require `(nfc-verified true)` as well. Passports additionally
 require `(chip-trusted true)`: both checks, not either:
 
 ```scheme
-; rules/default.spoc (thresholds omitted)
+; rules/default.spoc (accept rules)
+; Matching is positional: every rule lists the query fields in order
+; (liveness-score, face-match-level, doc-type, mrz-verified, nfc-verified,
+; barcode-verified, chip-trusted) and may stop early, but never skips one.
 ; Accept e-passports: MRZ verified, chip authenticated AND trusted by the go-trust PDP.
-; Positional matching: the (barcode-verified ...) placeholder is needed to reach chip-trusted.
-(facetec-scan (doc-type passport) (mrz-verified true) (nfc-verified true) (barcode-verified (* set true false)) (chip-trusted true))
+; The (barcode-verified ...) placeholder is needed to reach chip-trusted.
+(facetec-scan (liveness-score (* range numeric ge 080)) (face-match-level (* range numeric ge 06)) (doc-type passport) (mrz-verified true) (nfc-verified true) (barcode-verified (* set true false)) (chip-trusted true))
 
 ; Accept ID cards and driving licences with an authenticated NFC chip. "(mrz-verified)"
 ; with no value accepts either outcome.
-(facetec-scan (doc-type id_card) (mrz-verified) (nfc-verified true))
-(facetec-scan (doc-type dl) (mrz-verified) (nfc-verified true))
+(facetec-scan (liveness-score (* range numeric ge 080)) (face-match-level (* range numeric ge 06)) (doc-type id_card) (mrz-verified) (nfc-verified true))
+(facetec-scan (liveness-score (* range numeric ge 080)) (face-match-level (* range numeric ge 06)) (doc-type dl) (mrz-verified) (nfc-verified true))
 ```
 
 A scan without an authenticated chip gets a `credentialIssueErrorCode` (with a message in `credentialIssueError`):
