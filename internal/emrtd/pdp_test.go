@@ -244,3 +244,20 @@ func TestPDP_DenyCodeFromTopLevelReason(t *testing.T) {
 	assert.False(t, d.Trusted)
 	assert.Equal(t, "unknown_country", d.Code)
 }
+
+func TestPDP_DoesNotFollowRedirects(t *testing.T) {
+	var elsewhere atomic.Int32
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		elsewhere.Add(1)
+		_, _ = w.Write([]byte(`{"decision":true,"context":{"reason":{"admin":{"csca_sha256":"` + strings.Repeat("ab", 32) + `"}}}}`))
+	}))
+	t.Cleanup(other.Close)
+	var hits atomic.Int32
+	p := pdpServer(t, &hits, func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, other.URL+"/evaluation", http.StatusTemporaryRedirect)
+	})
+	d, err := p.EvaluateDSC(t.Context(), sampleRequest())
+	assert.Error(t, err)
+	assert.False(t, d.Trusted)
+	assert.Zero(t, elsewhere.Load(), "the redirect target must never be contacted")
+}

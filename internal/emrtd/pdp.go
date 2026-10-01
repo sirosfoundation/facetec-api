@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
 	"strings"
 	"time"
@@ -68,7 +69,14 @@ func NewPDPClient(baseURL string, timeout time.Duration) *PDPClient {
 	if timeout <= 0 {
 		timeout = defaultTimeout
 	}
-	return &PDPClient{client: authzenclient.New(baseURL, authzenclient.WithTimeout(timeout))}
+	// Never follow redirects: a 307/308 would replay the certificate-bearing
+	// POST to an origin the configuration did not name (even plaintext) and
+	// accept its decision. A 3xx is just a non-200 answer: not trusted.
+	hc := &http.Client{
+		Timeout:       timeout,
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
+	return &PDPClient{client: authzenclient.New(baseURL, authzenclient.WithHTTPClient(hc), authzenclient.WithTimeout(timeout))}
 }
 
 // EvaluateDSC implements TrustEvaluator. It retries once, and only for
