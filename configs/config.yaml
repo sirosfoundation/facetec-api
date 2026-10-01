@@ -79,7 +79,8 @@ trust:
   # pdp_url: "https://go-trust.example.org"
   timeout: "5s"
   # required=true (the default) refuses to start without pdp_url and rejects any
-  # untrusted chip outright. Development only: set false to run without a PDP
+  # passport scan (or scan with no reported document type) whose chip is missing
+  # or untrusted outright; ID cards and driving licences are not covered by it. Development only: set false to run without a PDP
   # (chip-trusted is then always false; the shipped passport rule will reject).
   required: false
 

@@ -49,8 +49,9 @@ authentic-looking but untrusted, and a copied genuine SOD fails clone detection.
 Independent of policy, `/process-request` requires status 4 for every document type and refuses
 anything else (`nfc_not_authenticated`, or the more specific `nfc_*` codes) before trust is even
 consulted; failed authentication (3, 5) is covered by that refusal. With `trust.required`
-(default true) a scan that passes that gate but whose raw chip data is missing or untrusted is
-rejected (`chip_untrusted`), and the service refuses to start without `trust.pdp_url`.
+(default true) a passport scan (or one with no reported document type) that passes that gate but
+whose raw chip data is missing or untrusted is rejected (`chip_untrusted`); ID cards and driving
+licences are not covered by this hard rejection and are left to policy (`nfc-verified`), and the service refuses to start without `trust.pdp_url`.
 
 Known trade-off: many genuine passports lack Active/Chip Authentication (status 1). Under this
 rule they are refused by design, accepting reduced coverage for clone resistance.

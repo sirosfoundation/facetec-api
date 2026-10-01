@@ -213,8 +213,10 @@ type TrustConfig struct {
 	// Timeout bounds each PDP request attempt. Default 5s.
 	Timeout time.Duration `yaml:"timeout" envconfig:"TRUST_TIMEOUT"`
 	// Required, when true (the default), makes the deployment refuse to start
-	// without pdp_url and hard-rejects any scan whose chip data was presented
-	// but not trusted, independent of the SPOCP rules. Set false only for
+	// without pdp_url and hard-rejects any passport scan (or scan with no
+	// reported document type) whose chip data was presented but not trusted,
+	// independent of the SPOCP rules. ID cards and driving licences are exempt
+	// and left to the SPOCP rules. Set false only for
 	// development or when the SPOCP rules deliberately do not depend on
 	// chip-trusted.
 	Required bool `yaml:"required" envconfig:"TRUST_REQUIRED"`
