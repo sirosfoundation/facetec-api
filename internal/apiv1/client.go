@@ -171,6 +171,11 @@ func (c *Client) SubmitIDScan(ctx context.Context, livenessSessionID string, idS
 		return "", "", fmt.Errorf("id-scan: tenant context missing from request")
 	}
 
+	c.log.Debug("id-scan document data",
+		zap.String("tenant", tc.ID),
+		zap.Any("document_data", documentDataForLog(idScanResult.DocumentData)),
+	)
+
 	// Same hard gate as ProcessRequest's nfcRejection check, adapted to this
 	// legacy path's response shape. FaceTec's /match-3d-3d response (decoded
 	// directly into IDScanResult) only carries a plain NFCVerified bool, with
@@ -271,6 +276,11 @@ func (c *Client) ProcessRequest(ctx context.Context, req *facetec.ProcessRequest
 		resp.CredentialIssueErrCode = string(idverrors.CodeInternalError)
 		return resp, nil
 	}
+
+	c.log.Debug("process-request document data",
+		zap.String("tenant", tc.ID),
+		zap.Any("document_data", documentDataForLog(scanResult.IDScan.DocumentData)),
+	)
 
 	// Hard gate: nothing is issued unless FaceTec Server proved liveness
 	// earlier in this same session. The final response does not say so
@@ -401,6 +411,15 @@ func livenessProofKey(ctx context.Context, externalDatabaseRefID string) (key st
 		tenantID = tc.ID
 	}
 	return tenantID + "\x00" + externalDatabaseRefID, true
+}
+
+// documentDataForLog is the OCR result written at debug level. The portrait
+// is a base64 face image, so only its length is included.
+func documentDataForLog(doc facetec.DocumentData) facetec.DocumentData {
+	if n := len(doc.Portrait); n > 0 {
+		doc.Portrait = fmt.Sprintf("[%d bytes omitted]", n)
+	}
+	return doc
 }
 
 // documentExpiryRejection refuses a document that has expired, or whose
