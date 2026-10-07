@@ -31,14 +31,15 @@ func TestBuildLogger_PIIWarning(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if include {
-					for _, text := range []string{"WARNING", "PII", "NFC/OCR", "NEVER enable this in production"} {
+				warningExpected := include && level != "error"
+				if warningExpected {
+					for _, text := range []string{"WARN", "WARNING", "PII", "NFC/OCR", "NEVER enable this in production"} {
 						if !strings.Contains(string(output), text) {
 							t.Errorf("startup warning missing %q: %s", text, output)
 						}
 					}
 				} else if len(output) != 0 {
-					t.Errorf("unexpected warning with PII disabled: %s", output)
+					t.Errorf("unexpected startup warning: %s", output)
 				}
 			})
 		}

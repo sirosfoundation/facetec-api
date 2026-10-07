@@ -65,9 +65,9 @@ technical and organisational measures (TOMs), and considerations relevant to GDP
 By default, including at `logging.level: debug`, document identity data is not logged.
 The explicit opt-in `logging.include_pii: true` (`LOG_INCLUDE_PII=true`) permits parsed
 NFC/OCR document fields, including names, dates, document numbers and MRZ lines, to be
-logged **only at Debug level**. It emits a clear warning to stderr during startup,
-regardless of the configured log level. **Never enable this in production**; use it only
-in isolated test/development environments, preferably with synthetic identities.
+logged **only at Debug level**. It emits a clear warning through the configured logger
+during startup, subject to the configured log level. **Never enable this in production**;
+use it only in isolated test/development environments, preferably with synthetic identities.
 Portraits, raw chip data, FaceMaps and request/response bodies remain excluded.
 This exception applies to document debug diagnostics, not request middleware or audit logs.
 The resulting logs persist in the operator's log sink, outside the in-memory TTL and
