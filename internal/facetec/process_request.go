@@ -420,29 +420,78 @@ func normalizeFaceTecDate(s string) string {
 		return s
 	}
 
-	// FaceTec dual-language format: "18 FEB/FEB 1987" → take first month.
-	if idx := strings.Index(s, "/"); idx > 0 {
-		// Find the surrounding space boundaries to isolate the month pair.
-		// Pattern: "DD MON1/MON2 YYYY"
-		parts := strings.Fields(s)
-		for i, p := range parts {
-			if strings.Contains(p, "/") {
-				parts[i] = p[:strings.Index(p, "/")]
-				break
+	for _, candidate := range faceTecDateCandidates(s) {
+		for _, layout := range dateLayouts {
+			if t, err := time.Parse(layout, candidate); err == nil {
+				return t.Format("2006-01-02")
 			}
-		}
-		s = strings.Join(parts, " ")
-	}
-
-	// Try "02 Jan 2006" (DD MON YYYY).
-	for _, layout := range []string{"02 Jan 2006", "02 January 2006", "2 Jan 2006", "02/01/2006", "01/02/2006"} {
-		if t, err := time.Parse(layout, s); err == nil {
-			return t.Format("2006-01-02")
 		}
 	}
 
 	// Return as-is if we can't parse it; downstream will see the raw value.
+	// MapPhotoIDClaims then leaves the claim out entirely, so the caller logs
+	// a warning naming the field — see apiv1.logUnparseableDates.
 	return s
+}
+
+// dateLayouts are the shapes FaceTec's OCR has been seen to report a date in,
+// beyond plain YYYY-MM-DD. "02/01/2006" (DD/MM) is tried before "01/02/2006"
+// (MM/DD) because the documents this service reads are overwhelmingly European;
+// a date that fits both is read as DD/MM.
+var dateLayouts = []string{
+	"02 Jan 2006",
+	"02 January 2006",
+	"2 Jan 2006",
+	"2 January 2006",
+	"Jan 02, 2006",
+	"January 02, 2006",
+	"Jan 2, 2006",
+	"02.01.2006",
+	"2.1.2006",
+	"2006/01/02",
+	"02/01/2006",
+	"01/02/2006",
+}
+
+// faceTecDateCandidates expands a raw FaceTec date into the strings worth
+// trying to parse, most likely first.
+//
+// Passports print the month in the issuing state's language and in English,
+// and FaceTec reports the pair as it is printed: "10 MRT/MAR 1965" on a Dutch
+// passport, "15 JAN/JAN 1990" on an English-language one (field type
+// "dd MMM/MMM yyyy"). Only the English half is parseable by time.Parse, and on
+// an English-language document the two halves are identical — which is why
+// keeping the *first* half (as this function's predecessor did) looked correct
+// for years and silently dropped birth_date for every document in another
+// language.
+//
+// The English half is taken first and the local-language half second, so a
+// document that prints them the other way round still parses.
+func faceTecDateCandidates(s string) []string {
+	idx := strings.Index(s, "/")
+	if idx <= 0 {
+		return []string{s}
+	}
+
+	// Pattern: "DD MON1/MON2 YYYY" — a slash inside one space-separated field.
+	// A slash-separated date ("02/01/2006") has no such field and is left alone.
+	fields := strings.Fields(s)
+	for i, f := range fields {
+		slash := strings.Index(f, "/")
+		if slash <= 0 || slash == len(f)-1 {
+			continue
+		}
+
+		second := append(append([]string{}, fields...), nil...)
+		second[i] = f[slash+1:]
+
+		first := append(append([]string{}, fields...), nil...)
+		first[i] = f[:slash]
+
+		return []string{strings.Join(second, " "), strings.Join(first, " "), s}
+	}
+
+	return []string{s}
 }
 
 func normalizeSex(s string) string {

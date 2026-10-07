@@ -374,6 +374,35 @@ func TestNormalizeFaceTecDate(t *testing.T) {
 		{"15 JAN/JAN 1990", "1990-01-15"},
 		{"20 MAY/MAY 2030", "2030-05-20"},
 		{"01 DEC 2025", "2025-12-01"},
+
+		// Dual-language month pairs from non-English passports: the English
+		// half is the parseable one, and keeping the local-language half
+		// instead is what silently dropped birth_date (and age_over_18,
+		// age_in_years, age_birth_year) from every Photo ID issued off such a
+		// document. Dutch, Swedish, Finnish, German, French, Spanish.
+		{"10 MRT/MAR 1965", "1965-03-10"},
+		{"01 MAJ/MAY 2031", "2031-05-01"},
+		{"24 TOUKO/MAY 1998", "1998-05-24"},
+		{"03 OKT/OCT 1977", "1977-10-03"},
+		{"09 AOUT/AUG 2029", "2029-08-09"},
+		{"17 DIC/DEC 1954", "1954-12-17"},
+
+		// The English half can come first, too.
+		{"10 MAR/MRT 1965", "1965-03-10"},
+
+		// Other shapes FaceTec OCR reports.
+		{"18.02.1987", "1987-02-18"},
+		{"1987/02/18", "1987-02-18"},
+		{"FEB 18, 1987", "1987-02-18"},
+
+		// A slash-separated numeric date is not a month pair: DD/MM wins over
+		// MM/DD, since these are European documents.
+		{"02/01/2006", "2006-01-02"},
+
+		// Still unparseable: a lone local-language month, with no English half
+		// to fall back on. Left as-is so the claim is dropped and the caller
+		// warns, rather than guessed at.
+		{"10 MAA 1965", "10 MAA 1965"},
 	}
 	for _, tt := range tests {
 		got := normalizeFaceTecDate(tt.input)

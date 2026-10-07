@@ -496,6 +496,33 @@ func (c *Client) issueCredential(ctx context.Context, result facetec.ScanResult,
 	return documentID, preauthReply.CredentialOfferURL, nil
 }
 
+// photoIDRequiredClaims are the RFC013 elements a Photo ID is not worth issuing
+// without. MapPhotoIDClaims leaves a claim out when the value it derives from
+// cannot be parsed, so a missing one here means the scan produced something
+// this service could not read -- a date in an unhandled format, most likely.
+var photoIDRequiredClaims = []string{"birth_date", "expiry_date"}
+
+// logMissingPhotoIDClaims warns when a Photo ID is about to be issued without
+// an element that should always be present. Without this the omission is
+// silent: the vc issuer refuses the credential (or, worse, accepts it), and
+// nothing in this service's log says which element went missing or why.
+// Only the claim names are logged, never their values.
+func (c *Client) logMissingPhotoIDClaims(claims map[string]any) {
+	var missing []string
+	for _, name := range photoIDRequiredClaims {
+		if _, ok := claims[name]; !ok {
+			missing = append(missing, name)
+		}
+	}
+	if len(missing) == 0 {
+		return
+	}
+
+	c.log.Warn("photo ID claims are missing elements the document should have provided",
+		zap.Strings("missing", missing),
+	)
+}
+
 // credentialClaims returns the document_data uploaded to the vc apigw for the
 // tenant's credential format. mdoc issues an EWC RFC013 Photo ID (see
 // MapPhotoIDClaims); every other format keeps the flat CredentialClaims shape.
@@ -505,10 +532,13 @@ func (c *Client) credentialClaims(doc facetec.DocumentData, documentID, authenti
 		if authority == "" {
 			authority = authenticSource
 		}
-		return MapPhotoIDClaims(doc, documentID, PhotoIDIssuer{
+		claims := MapPhotoIDClaims(doc, documentID, PhotoIDIssuer{
 			Authority: authority,
 			Country:   c.cfg.Issuer.IssuingCountry,
-		}, time.Now()), nil
+		}, time.Now())
+		c.logMissingPhotoIDClaims(claims)
+
+		return claims, nil
 	}
 
 	data, err := json.Marshal(MapDocumentData(doc))
