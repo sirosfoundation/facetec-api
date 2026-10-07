@@ -185,6 +185,29 @@ func TestValidate_MissingServerURL(t *testing.T) {
 	}
 }
 
+func TestValidate_IncludePIIRequiresDebugLevel(t *testing.T) {
+	for _, level := range []string{"", "info", "warn", "error"} {
+		t.Run(level, func(t *testing.T) {
+			cfg := &config.Config{
+				Logging: config.LoggingConfig{Level: level, IncludePII: true},
+			}
+			if err := cfg.Validate(); err == nil {
+				t.Errorf("expected error when logging.include_pii is enabled with level %q", level)
+			}
+		})
+	}
+
+	cfg := &config.Config{
+		FaceTec: config.FaceTecConfig{ServerURL: "https://x"},
+		Issuer:  config.IssuerConfig{Addr: "x", Scope: "s"},
+		JWT:     config.JWTConfig{Secret: "shared-secret"},
+		Logging: config.LoggingConfig{Level: "debug", IncludePII: true},
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("unexpected error with debug logging: %v", err)
+	}
+}
+
 func TestValidate_WithoutDeviceKey(t *testing.T) {
 	cfg := &config.Config{
 		FaceTec: config.FaceTecConfig{ServerURL: "https://x"},
