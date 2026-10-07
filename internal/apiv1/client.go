@@ -171,6 +171,8 @@ func (c *Client) SubmitIDScan(ctx context.Context, livenessSessionID string, idS
 		return "", "", fmt.Errorf("id-scan: tenant context missing from request")
 	}
 
+	c.logDocumentData("id-scan document data", tc.ID, idScanResult.DocumentData)
+
 	// Same hard gate as ProcessRequest's nfcRejection check, adapted to this
 	// legacy path's response shape. FaceTec's /match-3d-3d response (decoded
 	// directly into IDScanResult) only carries a plain NFCVerified bool, with
@@ -272,6 +274,8 @@ func (c *Client) ProcessRequest(ctx context.Context, req *facetec.ProcessRequest
 		return resp, nil
 	}
 
+	c.logDocumentData("process-request document data", tc.ID, scanResult.IDScan.DocumentData)
+
 	// Hard gate: nothing is issued unless FaceTec Server proved liveness
 	// earlier in this same session. The final response does not say so
 	// itself; the verdict was recorded from the liveness step, keyed by the
@@ -365,6 +369,17 @@ func (c *Client) ProcessRequest(ctx context.Context, req *facetec.ProcessRequest
 	resp.TransactionID = docID
 	resp.CredentialOfferURL = offerURL
 	return resp, nil
+}
+
+// logDocumentData is development-only; biometric images are always omitted.
+func (c *Client) logDocumentData(message, tenantID string, doc facetec.DocumentData) {
+	if !c.cfg.Logging.IncludePII {
+		return
+	}
+	if entry := c.log.Check(zap.DebugLevel, message); entry != nil {
+		doc.Portrait = ""
+		entry.Write(zap.String("tenant", tenantID), zap.Any("document_data", doc))
+	}
 }
 
 // nfcRejection reports why a scan without an authenticated chip is refused,

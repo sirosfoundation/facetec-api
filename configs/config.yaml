@@ -126,6 +126,9 @@ jwt:
 logging:
   # Log level: debug, info, warn, error
   level: "info"
+  # Include sensitive NFC/OCR identity data only at debug level (LOG_INCLUDE_PII).
+  # DEVELOPMENT/TEST ONLY — never enable in production. Emits a startup warning.
+  include_pii: false
 
 # ── Tenant overrides (optional) ───────────────────────────────────────────────
 # When this block is absent, a single "default" tenant is synthesised from the

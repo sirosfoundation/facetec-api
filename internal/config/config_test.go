@@ -36,6 +36,39 @@ func TestLoad_Defaults(t *testing.T) {
 	if cfg.Server.MaxConcurrentBiometric != 10 {
 		t.Errorf("Server.MaxConcurrentBiometric: got %d, want 10", cfg.Server.MaxConcurrentBiometric)
 	}
+	if cfg.Logging.IncludePII {
+		t.Error("Logging.IncludePII: want false by default")
+	}
+}
+
+func TestLoad_LoggingIncludePII(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		env  string
+		yaml string
+		want bool
+	}{
+		{"yaml opt-in", "", "true", true},
+		{"env opt-in", "true", "false", true},
+		{"env overrides yaml", "false", "true", false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("LOG_INCLUDE_PII", tt.env)
+			if tt.env == "" {
+				if err := os.Unsetenv("LOG_INCLUDE_PII"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			path := writeTemp(t, "config.yaml", "logging:\n  level: debug\n  include_pii: "+tt.yaml+"\n")
+			cfg, err := config.Load(path)
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if cfg.Logging.IncludePII != tt.want {
+				t.Errorf("Logging.IncludePII: got %v, want %v", cfg.Logging.IncludePII, tt.want)
+			}
+		})
+	}
 }
 
 // TestLoad_FromFile verifies that values are read from a YAML file.

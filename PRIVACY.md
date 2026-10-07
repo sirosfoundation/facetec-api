@@ -60,6 +60,19 @@ technical and organisational measures (TOMs), and considerations relevant to GDP
 | Tenant ID | Operational audit | Yes |
 | Document type (on policy rejection) | Debug logging | At `Debug` level only |
 
+### 2.4 Development-only sensitive debug logging
+
+By default, including at `logging.level: debug`, document identity data is not logged.
+The explicit opt-in `logging.include_pii: true` (`LOG_INCLUDE_PII=true`) permits parsed
+NFC/OCR document fields, including names, dates, document numbers and MRZ lines, to be
+logged **only at Debug level**. It emits a clear warning to stderr during startup,
+regardless of the configured log level. **Never enable this in production**; use it only
+in isolated test/development environments, preferably with synthetic identities.
+Portraits, raw chip data, FaceMaps and request/response bodies remain excluded.
+This exception applies to document debug diagnostics, not request middleware or audit logs.
+The resulting logs persist in the operator's log sink, outside the in-memory TTL and
+zeroing guarantees: restrict access and retention, and delete them after debugging.
+
 ---
 
 ## 3. Data Flow Diagram
@@ -123,6 +136,7 @@ technical and organisational measures (TOMs), and considerations relevant to GDP
 | Liveness verdict of a `/process-request` session (a boolean, keyed by tenant and `externalDatabaseRefID`) | Process RAM (`session.Manager.proofs`) | `session.liveness_proof_ttl` (default **15 min**) | Deleted on use at the session's final result; TTL eviction |
 | Signed credential | Process RAM (`session.Manager.offers`) | `session.offer_ttl` (default **5 min**) | Deleted atomically on first `GET /v1/offer/:txid`; TTL eviction |
 | Request logs | Log sink (operator-configured) | Operator's log retention policy | No personal data in log fields; see §2.3 |
+| Opt-in document debug logs (development only) | Log sink | Operator-controlled; delete after debugging | May contain document PII only when both Debug logging and `logging.include_pii` are enabled; see §2.4 |
 | Audit log event (`credential_issued`) | Log sink | Operator's log retention policy | Contains: tenant ID, transaction ID, doc type, format, scope, chip trust outcome and reason code, FaceTec `chip_auth_status`, DSC/CSCA certificate fingerprints — **no name, MRZ or biometric data** (the SOD signing time is not logged) |
 
 > **Note:** facetec-api has no database and no persistent storage of any kind. All data described
@@ -247,6 +261,7 @@ The following technical controls are implemented in code:
 | **Explicit zeroing** | `clear(faceMap)` is called on the `[]byte` FaceMap immediately after use (deferred in `SubmitIDScan`), and again by `Manager.Close()` on every in-memory entry at shutdown. |
 | **No body logging** | Gin middleware never logs request or response bodies. The panic-recovery handler is bound to `nil` to prevent biometric data appearing in crash dumps. |
 | **Structured logs scrubbed** | Log fields are explicitly enumerated: method, path, status, latency, IP, user-agent. Biometric scores are absent from Info-level logs. |
+| **Sensitive debug opt-in** | Document identity fields are excluded by default even at Debug level. `logging.include_pii` enables the development-only exception with a startup warning; portraits and raw biometric data remain excluded (§2.4). |
 | **One-time-use sessions** | Liveness entries and credential offers are deleted on first access (`TakeLiveness`, `TakeOffer`). An attacker cannot replay a session ID. |
 | **Rate limiting** | Biometric endpoints are rate-limited per source IP to slow automated bulk enumeration or scraping. |
 | **Short-lived sessions** | Default TTL of 2 min for liveness sessions limits the exposure window if a session ID is intercepted. |

@@ -230,6 +230,8 @@ type TrustConfig struct {
 // LoggingConfig controls log output.
 type LoggingConfig struct {
 	Level string `yaml:"level" envconfig:"LOG_LEVEL"`
+	// IncludePII enables sensitive document data at debug level. Never use in production.
+	IncludePII bool `yaml:"include_pii" envconfig:"LOG_INCLUDE_PII"`
 }
 
 // AuditConfig controls persistent IPV session audit logging.
