@@ -377,7 +377,9 @@ func (c *Client) logDocumentData(message, tenantID string, doc facetec.DocumentD
 		return
 	}
 	if entry := c.log.Check(zap.DebugLevel, message); entry != nil {
-		doc.Portrait = ""
+		if n := len(doc.Portrait); n > 0 {
+			doc.Portrait = fmt.Sprintf("[%d bytes omitted]", n)
+		}
 		entry.Write(zap.String("tenant", tenantID), zap.Any("document_data", doc))
 	}
 }

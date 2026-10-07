@@ -73,6 +73,9 @@ func TestDocumentLogging(t *testing.T) {
 					}
 				}
 				assert.NotContains(t, logs, doc.Portrait, "portraits must never be logged")
+				if tt.wantPII {
+					assert.Contains(t, logs, fmt.Sprintf("[%d bytes omitted]", len(doc.Portrait)))
+				}
 				assert.Equal(t, tt.wantPII, bytes.Contains(output.Bytes(), []byte("document_data")))
 			})
 		}
