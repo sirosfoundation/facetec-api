@@ -207,6 +207,39 @@ func TestDocumentExpiryRejection(t *testing.T) {
 	assert.True(t, rejected, "02:30 CEST on the 4th is the 4th in UTC")
 }
 
+func TestDocumentDataForLog(t *testing.T) {
+	cases := []struct {
+		name     string
+		doc      facetec.DocumentData
+		portrait string
+	}{
+		{
+			name: "redacts portrait",
+			doc: facetec.DocumentData{
+				GivenName:      "Alice",
+				DocumentNumber: "123",
+				Portrait:       "face-image",
+			},
+			portrait: "[10 bytes omitted]",
+		},
+		{
+			name: "empty portrait",
+			doc: facetec.DocumentData{
+				GivenName: "Alice",
+			},
+		},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			original := tt.doc
+			want := tt.doc
+			want.Portrait = tt.portrait
+			assert.Equal(t, want, documentDataForLog(tt.doc))
+			assert.Equal(t, original, tt.doc, "input remains unchanged")
+		})
+	}
+}
+
 func TestSubmitIDScan_ExpiredDocument_Rejected(t *testing.T) {
 	c, livenessID := newTestClientForIDScan(t, `{
 		"success": true,
