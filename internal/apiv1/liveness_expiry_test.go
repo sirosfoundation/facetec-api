@@ -11,6 +11,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 
 	"github.com/sirosfoundation/facetec-api/internal/facetec"
 	"github.com/sirosfoundation/facetec-api/internal/idverrors"
@@ -189,7 +190,7 @@ func TestDocumentExpiryRejection(t *testing.T) {
 		{"04-10-2026", true, idverrors.CodeDocumentUnreadable},
 	}
 	for _, tt := range cases {
-		code, msg, rejected := documentExpiryRejection(facetec.DocumentData{DateOfExpiry: tt.expiry}, now)
+		code, msg, rejected := documentExpiryRejection(zap.NewNop(), facetec.DocumentData{DateOfExpiry: tt.expiry}, now)
 		assert.Equal(t, tt.rejected, rejected, "expiry %q", tt.expiry)
 		assert.Equal(t, tt.code, code, "expiry %q", tt.expiry)
 		if rejected {
@@ -200,10 +201,43 @@ func TestDocumentExpiryRejection(t *testing.T) {
 	// The comparison is in UTC: just after midnight UTC on the day after
 	// expiry, the document has expired, whatever the server's time zone.
 	amsterdam := time.FixedZone("CEST", 2*60*60)
-	_, _, rejected := documentExpiryRejection(facetec.DocumentData{DateOfExpiry: "2026-10-03"}, time.Date(2026, 10, 4, 1, 30, 0, 0, amsterdam))
+	_, _, rejected := documentExpiryRejection(zap.NewNop(), facetec.DocumentData{DateOfExpiry: "2026-10-03"}, time.Date(2026, 10, 4, 1, 30, 0, 0, amsterdam))
 	assert.False(t, rejected, "01:30 CEST on the 4th is still the 3rd in UTC")
-	_, _, rejected = documentExpiryRejection(facetec.DocumentData{DateOfExpiry: "2026-10-03"}, time.Date(2026, 10, 4, 2, 30, 0, 0, amsterdam))
+	_, _, rejected = documentExpiryRejection(zap.NewNop(), facetec.DocumentData{DateOfExpiry: "2026-10-03"}, time.Date(2026, 10, 4, 2, 30, 0, 0, amsterdam))
 	assert.True(t, rejected, "02:30 CEST on the 4th is the 4th in UTC")
+}
+
+func TestDocumentDataForLog(t *testing.T) {
+	cases := []struct {
+		name     string
+		doc      facetec.DocumentData
+		portrait string
+	}{
+		{
+			name: "redacts portrait",
+			doc: facetec.DocumentData{
+				GivenName:      "Alice",
+				DocumentNumber: "123",
+				Portrait:       "face-image",
+			},
+			portrait: "[10 bytes omitted]",
+		},
+		{
+			name: "empty portrait",
+			doc: facetec.DocumentData{
+				GivenName: "Alice",
+			},
+		},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			original := tt.doc
+			want := tt.doc
+			want.Portrait = tt.portrait
+			assert.Equal(t, want, documentDataForLog(tt.doc))
+			assert.Equal(t, original, tt.doc, "input remains unchanged")
+		})
+	}
 }
 
 func TestSubmitIDScan_ExpiredDocument_Rejected(t *testing.T) {

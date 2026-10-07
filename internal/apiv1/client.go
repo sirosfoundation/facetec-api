@@ -171,6 +171,11 @@ func (c *Client) SubmitIDScan(ctx context.Context, livenessSessionID string, idS
 		return "", "", fmt.Errorf("id-scan: tenant context missing from request")
 	}
 
+	c.log.Debug("id-scan document data",
+		zap.String("tenant", tc.ID),
+		zap.Any("document_data", documentDataForLog(idScanResult.DocumentData)),
+	)
+
 	// Same hard gate as ProcessRequest's nfcRejection check, adapted to this
 	// legacy path's response shape. FaceTec's /match-3d-3d response (decoded
 	// directly into IDScanResult) only carries a plain NFCVerified bool, with
@@ -197,7 +202,7 @@ func (c *Client) SubmitIDScan(ctx context.Context, livenessSessionID string, idS
 		return "", "", rej
 	}
 
-	if code, msg, rejected := documentExpiryRejection(idScanResult.DocumentData, time.Now()); rejected {
+	if code, msg, rejected := documentExpiryRejection(c.log, idScanResult.DocumentData, time.Now()); rejected {
 		c.log.Info("id-scan scan rejected: document expiry",
 			zap.String("tenant", tc.ID),
 			zap.String("doc_type", idScanResult.DocumentData.DocumentType),
@@ -272,6 +277,11 @@ func (c *Client) ProcessRequest(ctx context.Context, req *facetec.ProcessRequest
 		return resp, nil
 	}
 
+	c.log.Debug("process-request document data",
+		zap.String("tenant", tc.ID),
+		zap.Any("document_data", documentDataForLog(scanResult.IDScan.DocumentData)),
+	)
+
 	// Hard gate: nothing is issued unless FaceTec Server proved liveness
 	// earlier in this same session. The final response does not say so
 	// itself; the verdict was recorded from the liveness step, keyed by the
@@ -324,7 +334,7 @@ func (c *Client) ProcessRequest(ctx context.Context, req *facetec.ProcessRequest
 
 	// Hard gate: an expired document, or one whose expiry date could not be
 	// read, is not a basis for a credential.
-	if code, msg, rejected := documentExpiryRejection(scanResult.IDScan.DocumentData, time.Now()); rejected {
+	if code, msg, rejected := documentExpiryRejection(c.log, scanResult.IDScan.DocumentData, time.Now()); rejected {
 		c.log.Info("process-request scan rejected: document expiry",
 			zap.String("tenant", tc.ID),
 			zap.String("doc_type", scanResult.IDScan.DocumentData.DocumentType),
@@ -403,18 +413,42 @@ func livenessProofKey(ctx context.Context, externalDatabaseRefID string) (key st
 	return tenantID + "\x00" + externalDatabaseRefID, true
 }
 
+// documentDataForLog is the OCR result written at debug level. The portrait
+// is a base64 face image, so only its length is included.
+func documentDataForLog(doc facetec.DocumentData) facetec.DocumentData {
+	if n := len(doc.Portrait); n > 0 {
+		doc.Portrait = fmt.Sprintf("[%d bytes omitted]", n)
+	}
+	return doc
+}
+
 // documentExpiryRejection refuses a document that has expired, or whose
 // expiry date is missing or unreadable. A document is valid through its
 // expiry date; dates are compared in UTC.
-func documentExpiryRejection(doc facetec.DocumentData, now time.Time) (code idverrors.Code, msg string, rejected bool) {
+func documentExpiryRejection(log *zap.Logger, doc facetec.DocumentData, now time.Time) (code idverrors.Code, msg string, rejected bool) {
+	nowUTC := now.UTC()
+	fields := []zap.Field{
+		zap.String("date_of_expiry", doc.DateOfExpiry),
+		zap.Time("now_utc", nowUTC),
+	}
 	expiry, ok := parseISODate(doc.DateOfExpiry)
+	fields = append(fields, zap.Bool("parsed", ok))
 	if !ok {
-		return idverrors.CodeDocumentUnreadable, "the document's expiry date could not be read", true
+		code, msg, rejected = idverrors.CodeDocumentUnreadable, "the document's expiry date could not be read", true
+	} else {
+		// Valid through the expiry date: the first instant it is expired is
+		// the start of the following UTC day.
+		validThrough := expiry.AddDate(0, 0, 1)
+		fields = append(fields, zap.Time("expiry", expiry), zap.Time("valid_through", validThrough))
+		if !nowUTC.Before(validThrough) {
+			code, msg, rejected = idverrors.CodeDocumentExpired, "the document has expired", true
+		}
 	}
-	if !now.UTC().Before(expiry.AddDate(0, 0, 1)) {
-		return idverrors.CodeDocumentExpired, "the document has expired", true
+	if rejected {
+		fields = append(fields, zap.String("code", string(code)))
 	}
-	return "", "", false
+	log.Debug("document expiry check", append(fields, zap.Bool("rejected", rejected))...)
+	return code, msg, rejected
 }
 
 // RedeemOffer retrieves and atomically removes a credential offer by transaction ID.
