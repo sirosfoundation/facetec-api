@@ -21,8 +21,8 @@ github.com/gin-contrib/sse v1.1.2 h1:MU2fgl1RrdYTMcgJLtz2kJF+vPg3xrqaaKfUUU18tCo
 github.com/gin-contrib/sse v1.1.2/go.mod h1:QXzuVkA0YO7o/gun03UI1Q+FTI8ZV/n5t03kIQAI89s=
 github.com/gin-gonic/gin v1.12.0 h1:b3YAbrZtnf8N//yjKeU2+MQsh2mY5htkZidOM7O0wG8=
 github.com/gin-gonic/gin v1.12.0/go.mod h1:VxccKfsSllpKshkBWgVgRniFFAzFb9csfngsqANjnLc=
-github.com/gmrtd/gmrtd v1.2.0 h1:Opazds50Ieej17TBZFMNmlEYjkNJuN0XPx9A5qKsHnQ=
-github.com/gmrtd/gmrtd v1.2.0/go.mod h1:Qml3ttavHGX/07tWgR5NFBYr8AcOP0DIK2N/mDFL7Hk=
+github.com/gmrtd/gmrtd v1.3.3 h1:UCTA7r+c+ORr5vR0QEbRUyflrpPSiJH3vFQxAI1d0J4=
+github.com/gmrtd/gmrtd v1.3.3/go.mod h1:95uMPHNyVhvwGmwZUN2hUw4NBuWgQGw7y8kzaYTqBSc=
 github.com/go-playground/assert/v2 v2.2.0 h1:JvknZsQTYeFEAhQwI4qEt9cyV5ONwRHC+lYKSsYSR8s=
 github.com/go-playground/assert/v2 v2.2.0/go.mod h1:VDjEfimB/XKnb+ZQfWdccd7VUvScMdVu0Titje2rxJ4=
 github.com/go-playground/locales v0.14.1 h1:EWaQ/wswjilfKLTECiXz7Rh+3BjFhfDFKv/oXslEjJA=
@@ -84,8 +84,8 @@ github.com/quic-go/quic-go v0.62.0 h1:ZHDjCk5OacATwGvs8PWE97CTvX7AqZiVoW7++ZOXTf
 github.com/quic-go/quic-go v0.62.0/go.mod h1:RAro2j2yN9a9EiPACLHT9IB2NXCvGQmmo/alT0yYI0w=
 github.com/sirosfoundation/go-spocp v0.1.0 h1:fH/jrSHS8vc+KfAzJmq3fE9OH69ShRgL7G1ihb9FCPs=
 github.com/sirosfoundation/go-spocp v0.1.0/go.mod h1:a6WtxG5hnsUzcqUt5iHmSMvyX4PLUPMDFK7FLoDMSMs=
-github.com/sirosfoundation/go-trust v0.23.2 h1:x4C/DiIUnAYCM8ougw4SeO98DjNEj4dgHKgr97Hq248=
-github.com/sirosfoundation/go-trust v0.23.2/go.mod h1:VxG1sfPgHMd2Enihz3ROcX0zprho/HsedCXRFH6uRKs=
+github.com/sirosfoundation/go-trust v0.24.0 h1:5ag5jtS33MzL0yb08JYVOvDTAD0S/f5Tlq5ESGcJ28k=
+github.com/sirosfoundation/go-trust v0.24.0/go.mod h1:EA5h3IhalYs9Se3pHodOXd9/JKPYC8yb+9gOnNEtGzQ=
 github.com/stretchr/objx v0.1.0/go.mod h1:HFkY916IF+rwdDfMAkV7OtwuqBVzrE8GR6GFx+wExME=
 github.com/stretchr/objx v0.4.0/go.mod h1:YvHI0jy2hoMjB+UWwv71VJQ9isScKT/TqJzVSSt89Yw=
 github.com/stretchr/objx v0.5.0/go.mod h1:Yh+to48EsGEfYuaHDzXPcE3xhTkx73EhmCGUpEOglKo=
