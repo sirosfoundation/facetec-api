@@ -4,14 +4,14 @@ go 1.27
 
 require (
 	github.com/gin-gonic/gin v1.12.0
-	github.com/gmrtd/gmrtd v1.2.0
+	github.com/gmrtd/gmrtd v1.3.3
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/kelseyhightower/envconfig v1.4.0
 	github.com/mrjoshuak/go-jpeg2000 v1.5.12
 	github.com/prometheus/client_golang v1.24.1
 	github.com/prometheus/client_model v0.6.3
 	github.com/sirosfoundation/go-spocp v0.1.0
-	github.com/sirosfoundation/go-trust v0.23.2
+	github.com/sirosfoundation/go-trust v0.24.0
 	github.com/stretchr/testify v1.12.1
 	go.uber.org/zap v1.28.0
 	gopkg.in/yaml.v3 v3.0.1
