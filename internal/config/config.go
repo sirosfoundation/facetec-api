@@ -230,6 +230,8 @@ type TrustConfig struct {
 // LoggingConfig controls log output.
 type LoggingConfig struct {
 	Level string `yaml:"level" envconfig:"LOG_LEVEL"`
+	// IncludePII enables sensitive document data at debug level. Never use in production.
+	IncludePII bool `yaml:"include_pii" envconfig:"LOG_INCLUDE_PII"`
 }
 
 // AuditConfig controls persistent IPV session audit logging.
@@ -279,6 +281,9 @@ func Load(path string) (*Config, error) {
 // Validate returns an error if required fields are missing or if the
 // configuration is unsafe for a production deployment.
 func (c *Config) Validate() error {
+	if c.Logging.IncludePII && c.Logging.Level != "debug" {
+		return fmt.Errorf("config: logging.include_pii requires logging.level: debug")
+	}
 	if c.FaceTec.ServerURL == "" {
 		return fmt.Errorf("config: facetec.server_url is required")
 	}

@@ -84,6 +84,14 @@ by environment variables. The full annotated reference is [configs/config.yaml](
 | `session.offer_ttl` | `SESSION_OFFER_TTL` | `5m` | How long a credential offer is held in memory |
 | `session.liveness_proof_ttl` | `SESSION_LIVENESS_PROOF_TTL` | `15m` | How long FaceTec Server's liveness verdict for a `/process-request` session is held, from its liveness step to its final photo ID match result |
 | `logging.level` | `LOG_LEVEL` | `info` | Log level: `debug`, `info`, `warn`, `error` |
+| `logging.include_pii` | `LOG_INCLUDE_PII` | `false` | Include sensitive NFC/OCR document data only when `logging.level` is `debug`; other levels prevent startup. **Never enable in production**; emits a startup warning when enabled |
+
+Ordinary debug logging does not include document identity data. For isolated test/development
+environments only, set both `LOG_LEVEL=debug` and `LOG_INCLUDE_PII=true` to log parsed
+document fields, including names, dates, document numbers and MRZ lines. Portraits, raw chip
+data and request/response bodies remain excluded. These settings require a process restart;
+SIGHUP reloads tenant settings only. Restrict access to these sensitive logs and delete them
+after debugging; in production, keep `logging.include_pii: false`, including when using debug logs.
 
 Numeric acceptance thresholds are encoded in the SPOCP rule files themselves rather than as
 separate config keys. This keeps deployment policy in one place and allows per-tenant rule sets

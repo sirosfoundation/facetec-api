@@ -149,5 +149,12 @@ func buildLogger(cfg *config.Config) (*zap.Logger, error) {
 	default:
 		zapCfg.Level.SetLevel(zap.InfoLevel)
 	}
-	return zapCfg.Build()
+	logger, err := zapCfg.Build()
+	if err != nil {
+		return nil, err
+	}
+	if cfg.Logging.IncludePII {
+		logger.Warn("WARNING: sensitive PII debug logging is enabled (logging.include_pii). NFC/OCR identity data may be written to logs at debug level. NEVER enable this in production.")
+	}
+	return logger, nil
 }
