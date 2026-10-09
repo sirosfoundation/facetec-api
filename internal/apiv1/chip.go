@@ -78,7 +78,12 @@ func (c *Client) assessChip(ctx context.Context, scan *facetec.ScanResult) *idve
 // chipAuditFields are the structured log fields recording how the chip was
 // judged, for the AUDIT credential_issued record.
 func chipAuditFields(id facetec.IDScanResult) []zap.Field {
+	chipFaceMatchLevel := -1 // not reported
+	if id.ChipFaceMatchLevel != nil {
+		chipFaceMatchLevel = *id.ChipFaceMatchLevel
+	}
 	return []zap.Field{
+		zap.Int("chip_face_match_level", chipFaceMatchLevel),
 		zap.Bool("chip_trusted", id.ChipTrusted),
 		zap.String("chip_trust_reason", id.ChipTrustReason),
 		zap.Int("chip_auth_status", id.ChipAuthStatus),
@@ -97,4 +102,28 @@ func bindPortraitToChip(id *facetec.IDScanResult, verifiedDGs []int) {
 		return
 	}
 	id.DocumentData.Portrait = ""
+}
+
+// defaultMinChipFaceMatchLevel applies when no minimum is configured (0);
+// config.Validate refuses anything outside 0–10.
+const defaultMinChipFaceMatchLevel = 6
+
+// chipFaceRejection refuses a scan whose face does not match the photo on the
+// document's chip (FaceTec's matchLevelNFCToFaceMap). The chip gates prove
+// the chip is genuine and the printed-photo match (matchLevel) proves the face
+// matches the data page; only this ties the chip, and so the identity in the
+// credential, to the person in front of the camera. Without it, a genuine
+// document with a substituted printed photo passes every other check. A scan
+// for which FaceTec reported no chip match is refused too (fail closed).
+func chipFaceRejection(id facetec.IDScanResult, minLevel int) (code idverrors.Code, msg string, rejected bool) {
+	if minLevel < 1 {
+		minLevel = defaultMinChipFaceMatchLevel
+	}
+	if id.ChipFaceMatchLevel == nil {
+		return idverrors.CodeChipPhotoMismatch, "the face could not be compared with the photo on the document's chip", true
+	}
+	if *id.ChipFaceMatchLevel < minLevel {
+		return idverrors.CodeChipPhotoMismatch, "the face does not match the photo on the document's chip", true
+	}
+	return "", "", false
 }

@@ -124,6 +124,7 @@ func expiryPayload(expiry string) string {
 	"idScanResultsSoFar": {
 		"photoIDNextStepEnumInt": 4,
 		"matchLevel": 7,
+		"matchLevelNFCToFaceMap": 7,
 		"nfcStatusEnumInt": 4,
 		"nfcAuthenticationStatusEnumInt": 4,
 		"mrzStatusEnumInt": 2,
@@ -162,7 +163,8 @@ func TestProcessRequest_DocumentExpiry(t *testing.T) {
 func TestProcessRequest_ExpiryGateAfterChipGate(t *testing.T) {
 	payload := `{
 	"idScanResultsSoFar": {
-		"photoIDNextStepEnumInt": 4, "matchLevel": 7,
+		"photoIDNextStepEnumInt": 4, "matchLevel": 7, "matchLevelNFCToFaceMap": 7,
+		"matchLevelNFCToFaceMap": 7,
 		"nfcStatusEnumInt": 2, "nfcAuthenticationStatusEnumInt": 0,
 		"mrzStatusEnumInt": 2, "barcodeStatusEnumInt": 3,
 		"documentData": {"documentType": "passport", "dateOfExpiry": "2020-01-31"}
@@ -210,6 +212,7 @@ func TestSubmitIDScan_ExpiredDocument_Rejected(t *testing.T) {
 	c, livenessID := newTestClientForIDScan(t, `{
 		"success": true,
 		"faceMatchLevel": 7,
+		"matchLevelNFCToFaceMap": 7,
 		"nfcVerified": true,
 		"mrzVerified": true,
 		"barcodeVerified": true,

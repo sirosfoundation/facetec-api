@@ -64,6 +64,11 @@ type IDScanResult struct {
 	// (NFCVerified) is accepted; 3 and 5 are refused as nfc_not_authenticated.
 	// Only set by ExtractScanResult.
 	ChipAuthStatus int `json:"chipAuthStatus"`
+	// ChipFaceMatchLevel is FaceTec's matchLevelNFCToFaceMap (0–10): how well
+	// the live 3D FaceMap matches the photo on the document's chip (DG2).
+	// FaceMatchLevel, by contrast, compares it with the photo printed on the
+	// document. nil when FaceTec did not report it (e.g. before a chip read).
+	ChipFaceMatchLevel *int `json:"matchLevelNFCToFaceMap,omitempty"`
 	// ChipTrusted is true only when facetec-api itself verified the SOD and
 	// data-group hashes AND the go-trust PDP trusts the DSC for the issuing
 	// state. FaceTec's own checks never contribute to it. Set by the caller

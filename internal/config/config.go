@@ -76,6 +76,11 @@ type FaceTecConfig struct {
 	// DeviceKeyPath loads DeviceKey from a file (takes precedence over DeviceKey if set).
 	DeviceKeyPath string        `yaml:"device_key_path" envconfig:"FACETEC_DEVICE_KEY_PATH"`
 	Timeout       time.Duration `yaml:"timeout"         envconfig:"FACETEC_TIMEOUT"`
+	// MinChipFaceMatchLevel is the lowest matchLevelNFCToFaceMap (0–10, the
+	// match between the live face and the photo on the document's chip) that
+	// may be issued. A hard gate, independent of the SPOCP rules; 0 selects the
+	// default (6), so it cannot be switched off.
+	MinChipFaceMatchLevel int `yaml:"min_chip_face_match_level" envconfig:"FACETEC_MIN_CHIP_FACE_MATCH_LEVEL"`
 	// TLS configures the HTTPS connection to the FaceTec Server.
 	TLS FaceTecTLSConfig `yaml:"tls"`
 }
@@ -287,6 +292,10 @@ func (c *Config) Validate() error {
 	if c.FaceTec.ServerURL == "" {
 		return fmt.Errorf("config: facetec.server_url is required")
 	}
+	// 0 selects the default (6); the gate cannot be switched off.
+	if c.FaceTec.MinChipFaceMatchLevel < 0 || c.FaceTec.MinChipFaceMatchLevel > 10 {
+		return fmt.Errorf("config: facetec.min_chip_face_match_level must be between 1 and 10 (0 selects the default, 6), got %d", c.FaceTec.MinChipFaceMatchLevel)
+	}
 	if c.Issuer.Addr == "" {
 		return fmt.Errorf("config: issuer.addr is required")
 	}
@@ -397,7 +406,8 @@ func defaultConfig() *Config {
 			MaxConcurrentBiometric: 10,
 		},
 		FaceTec: FaceTecConfig{
-			Timeout: 30 * time.Second,
+			Timeout:               30 * time.Second,
+			MinChipFaceMatchLevel: 6,
 		},
 		Issuer: IssuerConfig{
 			Format: "sdjwt",

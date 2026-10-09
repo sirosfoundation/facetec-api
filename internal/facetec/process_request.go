@@ -90,6 +90,17 @@ func ExtractScanResult(payload map[string]any) (*ScanResult, bool, error) {
 		return nil, false, nil
 	}
 
+	// matchLevelNFCToFaceMap compares the live FaceMap with the photo on the
+	// document's chip (matchLevel compares it with the printed photo). Absent
+	// is kept apart from 0; a present value of the wrong type is an error
+	// (fail closed).
+	var chipFaceMatchLevel *int
+	if level, present, err := lookupInt(results["matchLevelNFCToFaceMap"]); err != nil {
+		return nil, false, fmt.Errorf("facetec: matchLevelNFCToFaceMap: %w", err)
+	} else if present {
+		chipFaceMatchLevel = &level
+	}
+
 	// documentData lives inside idScanResultsSoFar.
 	documentData, ok, err := extractDocumentData(results["documentData"])
 	if err != nil {
@@ -160,16 +171,17 @@ func ExtractScanResult(payload map[string]any) (*ScanResult, bool, error) {
 	// fills Liveness in from that verdict.
 	return &ScanResult{
 		IDScan: IDScanResult{
-			Success:         true,
-			FaceMatchLevel:  matchLevel,
-			DocumentData:    documentData,
-			MRZVerified:     mrzStatus == 2,
-			NFCVerified:     nfcAuthStatus == 4,
-			NFCStatus:       nfcStatus,
-			BarcodeVerified: barcodeStatus == 3,
-			ChipAuthStatus:  nfcAuthStatus,
-			ChipRaw:         extractNFCRawData(results["documentData"]),
-			ChipPortrait:    chipPortrait,
+			Success:            true,
+			FaceMatchLevel:     matchLevel,
+			DocumentData:       documentData,
+			MRZVerified:        mrzStatus == 2,
+			ChipFaceMatchLevel: chipFaceMatchLevel,
+			NFCVerified:        nfcAuthStatus == 4,
+			NFCStatus:          nfcStatus,
+			BarcodeVerified:    barcodeStatus == 3,
+			ChipAuthStatus:     nfcAuthStatus,
+			ChipRaw:            extractNFCRawData(results["documentData"]),
+			ChipPortrait:       chipPortrait,
 		},
 	}, true, nil
 }

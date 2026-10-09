@@ -43,6 +43,7 @@ const nfcSkippedPayload = `{
 	"idScanResultsSoFar": {
 		"photoIDNextStepEnumInt": 4,
 		"matchLevel": 7,
+		"matchLevelNFCToFaceMap": 7,
 		"nfcStatusEnumInt": 2,
 		"nfcAuthenticationStatusEnumInt": 0,
 		"mrzStatusEnumInt": 2,
@@ -62,6 +63,7 @@ const nfcCompletedPayload = `{
 	"idScanResultsSoFar": {
 		"photoIDNextStepEnumInt": 4,
 		"matchLevel": 7,
+		"matchLevelNFCToFaceMap": 7,
 		"nfcStatusEnumInt": 4,
 		"nfcAuthenticationStatusEnumInt": 4,
 		"mrzStatusEnumInt": 2,
@@ -81,6 +83,7 @@ func nfcPayload(nfcStatus, nfcAuthStatus int) string {
 	"idScanResultsSoFar": {
 		"photoIDNextStepEnumInt": 4,
 		"matchLevel": 7,
+		"matchLevelNFCToFaceMap": 7,
 		"nfcStatusEnumInt": %d,
 		"nfcAuthenticationStatusEnumInt": %d,
 		"mrzStatusEnumInt": 2,
@@ -241,6 +244,7 @@ func TestSubmitIDScan_NFCNotVerified_RejectsWithoutIssuing(t *testing.T) {
 	c, livenessID := newTestClientForIDScan(t, `{
 		"success": true,
 		"faceMatchLevel": 7,
+		"matchLevelNFCToFaceMap": 7,
 		"nfcVerified": false,
 		"mrzVerified": true,
 		"barcodeVerified": true,
@@ -268,6 +272,7 @@ func TestSubmitIDScan_NFCVerified_DoesNotTriggerSkipGate(t *testing.T) {
 	c, livenessID := newTestClientForIDScan(t, `{
 		"success": true,
 		"faceMatchLevel": 7,
+		"matchLevelNFCToFaceMap": 7,
 		"nfcVerified": true,
 		"mrzVerified": true,
 		"barcodeVerified": true,
