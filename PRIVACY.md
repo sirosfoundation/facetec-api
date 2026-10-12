@@ -11,7 +11,7 @@ verifiable-credential (VC) issuer. Its role is to:
 
 1. Receive a biometric liveness scan.
 2. Take a photo of the photo-ID, perform the OCR read of the data including the MRZ information.
-3. Access the photo-ID chip using thE NFC and read the data stored in the document that includes the users personal data and the documents signing certificates and security components stored on the chip (hashes, signatures and keys).
+3. Access the photo-ID chip using NFC and read the data stored in the document that includes the user's personal data, the document signing certificate and security components stored on the chip (hashes, signatures and keys).
 4. Perform active photo-ID authentication (check that the document was not cloned). (Performing the passive authentication of the photo-ID document is not in scope of facetec-api and is left to customers to implement their own flow).
 5. Verify that the data from the NFC chip was not tampered with.
 6. Verify liveness and face-to-document match via the FaceTec Server.
