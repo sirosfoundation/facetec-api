@@ -413,13 +413,31 @@ func livenessProofKey(ctx context.Context, externalDatabaseRefID string) (key st
 	return tenantID + "\x00" + externalDatabaseRefID, true
 }
 
-// documentDataForLog is the OCR result written at debug level. The portrait
-// is a base64 face image, so only its length is included.
-func documentDataForLog(doc facetec.DocumentData) facetec.DocumentData {
-	if n := len(doc.Portrait); n > 0 {
-		doc.Portrait = fmt.Sprintf("[%d bytes omitted]", n)
+// documentDataForLog is the diagnostic summary of the OCR result written at
+// debug level. It is an allowlist: only the non-personal document type and
+// per-field presence and length are included, never
+// values (name, number, dates, MRZ, portrait), per PRIVACY.md.
+func documentDataForLog(doc facetec.DocumentData) map[string]any {
+	fields := map[string]string{
+		"given_name":      doc.GivenName,
+		"family_name":     doc.FamilyName,
+		"document_number": doc.DocumentNumber,
+		"date_of_birth":   doc.DateOfBirth,
+		"date_of_expiry":  doc.DateOfExpiry,
+		"nationality":     doc.Nationality,
+		"sex":             doc.Sex,
+		"issuing_country": doc.IssuingCountry,
+		"mrz_line1":       doc.MRZLine1,
+		"mrz_line2":       doc.MRZLine2,
+		"mrz_line3":       doc.MRZLine3,
+		"portrait":        doc.Portrait,
 	}
-	return doc
+	out := map[string]any{"document_type": doc.DocumentType}
+	for name, v := range fields {
+		out[name+"_present"] = v != ""
+		out[name+"_len"] = len(v)
+	}
+	return out
 }
 
 // documentExpiryRejection refuses a document that has expired, or whose
@@ -428,8 +446,7 @@ func documentDataForLog(doc facetec.DocumentData) facetec.DocumentData {
 func documentExpiryRejection(log *zap.Logger, doc facetec.DocumentData, now time.Time) (code idverrors.Code, msg string, rejected bool) {
 	nowUTC := now.UTC()
 	fields := []zap.Field{
-		zap.String("date_of_expiry", doc.DateOfExpiry),
-		zap.Time("now_utc", nowUTC),
+		zap.Int("date_of_expiry_len", len(doc.DateOfExpiry)),
 	}
 	expiry, ok := parseISODate(doc.DateOfExpiry)
 	fields = append(fields, zap.Bool("parsed", ok))
@@ -439,7 +456,7 @@ func documentExpiryRejection(log *zap.Logger, doc facetec.DocumentData, now time
 		// Valid through the expiry date: the first instant it is expired is
 		// the start of the following UTC day.
 		validThrough := expiry.AddDate(0, 0, 1)
-		fields = append(fields, zap.Time("expiry", expiry), zap.Time("valid_through", validThrough))
+		fields = append(fields, zap.Int("days_until_expiry", int(validThrough.Sub(nowUTC).Hours()/24)))
 		if !nowUTC.Before(validThrough) {
 			code, msg, rejected = idverrors.CodeDocumentExpired, "the document has expired", true
 		}

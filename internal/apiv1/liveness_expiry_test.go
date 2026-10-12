@@ -3,6 +3,7 @@ package apiv1
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -208,35 +209,30 @@ func TestDocumentExpiryRejection(t *testing.T) {
 }
 
 func TestDocumentDataForLog(t *testing.T) {
-	cases := []struct {
-		name     string
-		doc      facetec.DocumentData
-		portrait string
-	}{
-		{
-			name: "redacts portrait",
-			doc: facetec.DocumentData{
-				GivenName:      "Alice",
-				DocumentNumber: "123",
-				Portrait:       "face-image",
-			},
-			portrait: "[10 bytes omitted]",
-		},
-		{
-			name: "empty portrait",
-			doc: facetec.DocumentData{
-				GivenName: "Alice",
-			},
-		},
+	doc := facetec.DocumentData{
+		GivenName:      "Alice",
+		FamilyName:     "Liddell",
+		DocumentNumber: "X1234567",
+		DateOfBirth:    "1990-01-02",
+		DateOfExpiry:   "2030-05-06",
+		IssuingCountry: "NLD",
+		DocumentType:   "passport",
+		MRZLine1:       "P<NLDLIDDELL<<ALICE",
+		Portrait:       "face-image",
 	}
-	for _, tt := range cases {
-		t.Run(tt.name, func(t *testing.T) {
-			original := tt.doc
-			want := tt.doc
-			want.Portrait = tt.portrait
-			assert.Equal(t, want, documentDataForLog(tt.doc))
-			assert.Equal(t, original, tt.doc, "input remains unchanged")
-		})
+	got := documentDataForLog(doc)
+
+	assert.Equal(t, "passport", got["document_type"])
+	assert.Equal(t, true, got["portrait_present"])
+	assert.Equal(t, 10, got["portrait_len"])
+	assert.Equal(t, true, got["given_name_present"])
+	assert.Equal(t, 5, got["given_name_len"])
+	assert.Equal(t, false, got["mrz_line3_present"])
+	assert.Equal(t, 0, got["mrz_line3_len"])
+
+	logged := fmt.Sprint(got)
+	for _, secret := range []string{"Alice", "Liddell", "X1234567", "1990-01-02", "2030-05-06", "NLD", "P<NLD", "face-image"} {
+		assert.NotContains(t, logged, secret)
 	}
 }
 
