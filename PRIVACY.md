@@ -9,10 +9,14 @@
 `facetec-api` is a microservice that bridges a mobile biometric SDK (FaceTec) with a
 verifiable-credential (VC) issuer. Its role is to:
 
-1. Receive a biometric liveness scan and a photo-ID scan from a mobile device.
-2. Verify liveness and face-to-document match via the FaceTec Server.
-3. Evaluate the result against a configurable acceptance policy (SPOCP).
-4. On policy acceptance, forward the extracted identity fields to a VC issuer and return
+1. Receive a biometric liveness scan.
+2. Take a photo of the photo-ID, perform the OCR read of the data including the MRZ information.
+3. Access the photo-ID chip using NFC and read the data stored in the document that includes the user's personal data, the document signing certificate and security components stored on the chip (hashes, signatures and keys).
+4. Perform active photo-ID authentication (check that the document was not cloned). (Performing the passive authentication of the photo-ID document is not in scope of facetec-api and is left to customers to implement their own flow).
+5. Verify that the data from the NFC chip was not tampered with.
+6. Verify liveness and face-to-document match via the FaceTec Server.
+7. Evaluate the result against a configurable acceptance policy (SPOCP).
+8. On policy acceptance, forward the extracted identity fields to a VC issuer and return
    a signed verifiable credential to the holder.
 
 This document covers the data flows, data categories processed, retention periods,
@@ -38,15 +42,15 @@ technical and organisational measures (TOMs), and considerations relevant to GDP
 
 | Data element | Source | Destination |
 |---|---|---|
-| Given name | OCR of scanned document | VC issuer (gRPC) → included in issued credential |
-| Family name | OCR | VC issuer → credential |
-| Date of birth | OCR | VC issuer → credential |
-| Date of expiry | OCR | VC issuer → credential |
-| Nationality | OCR | VC issuer → credential |
-| Sex | OCR | VC issuer → credential |
-| Issuing country | OCR | VC issuer → credential |
-| Document number | OCR | VC issuer → credential |
-| Document type | OCR | VC issuer → credential; also used in policy evaluation |
+| Given name | OCR and NFC of scanned document | VC issuer (gRPC) → included in issued credential |
+| Family name | OCR and NFC | VC issuer → credential |
+| Date of birth | OCR and NFC | VC issuer → credential |
+| Date of expiry | OCR and NFC | VC issuer → credential |
+| Nationality | OCR and NFC | VC issuer → credential |
+| Sex | OCR and NFC | VC issuer → credential |
+| Issuing country | OCR and NFC | VC issuer → credential |
+| Document number | OCR and NFC | VC issuer → credential |
+| Document type | OCR and NFC | VC issuer → credential; also used in policy evaluation |
 | **MRZ lines 1–3** | OCR | Stripped before forwarding; never sent to issuer |
 
 ### 2.3 Technical / operational data (not directly personal)
@@ -79,12 +83,13 @@ zeroing guarantees: restrict access and retention, and delete them after debuggi
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│  Mobile Device (Data Subject holds device)                                 │
+│  Mobile Device (Data Subject holds device)                                  │
 │                                                                             │
 │  FaceTec SDK captures:                                                      │
 │    • FaceScan (biometric)                                                   │
 │    • AuditTrail images (biometric)                                          │
 │    • ID scan / front+back images (documentary)                              │
+│    • ID NFC read (documentary)                                              │
 └───────────────────────┬─────────────────────────────────────────────────────┘
                         │ HTTPS POST (TLS required in production)
                         ▼
