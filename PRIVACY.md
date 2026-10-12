@@ -344,4 +344,3 @@ Key items a DPIA must address for this service:
 
 *Last updated: 2026-03-15. Review when any of the following change: data flows, sub-processors,
 legal basis, applicable national law, or FaceTec SDK/Server version.*
-│    • ID scan / front+back images (documentary)
