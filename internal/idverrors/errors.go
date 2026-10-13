@@ -44,6 +44,10 @@ const (
 	// (nfcAuthenticationStatusEnumInt != AUTHENTICATED), including a chip that
 	// was read but failed authentication.
 	CodeNFCNotAuthenticated Code = "nfc_not_authenticated"
+	// CodeChipPhotoMismatch indicates the face did not match the photo on the
+	// document's chip (FaceTec's matchLevelNFCToFaceMap), or could not be
+	// compared with it.
+	CodeChipPhotoMismatch Code = "chip_photo_mismatch"
 	// CodeDocumentExpired indicates the document's expiry date has passed.
 	CodeDocumentExpired Code = "document_expired"
 	// CodeIssuanceFailed indicates credential issuance failed after successful verification.
