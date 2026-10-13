@@ -180,39 +180,127 @@ func TestVerify_UnknownIssuingState(t *testing.T) {
 	assert.Equal(t, ReasonUnknownIssuer, res.Reason)
 }
 
-func TestVerify_MRZMismatch(t *testing.T) {
-	base := func(c *emrtdtest.Chip) Claimed { return claimedFor(c) }
-	cases := map[string]func(*Claimed){
-		"document number":   func(c *Claimed) { c.DocumentNumber = "ZZ9999999" },
-		"date of birth":     func(c *Claimed) { c.DateOfBirth = "1985-03-08" },
-		"date of expiry":    func(c *Claimed) { c.DateOfExpiry = "2031-10-01" },
-		"family name":       func(c *Claimed) { c.FamilyName = "SVENSSON" },
-		"given name":        func(c *Claimed) { c.GivenName = "KARIN" },
-		"nationality":       func(c *Claimed) { c.Nationality = "NOR" },
-		"issuing country":   func(c *Claimed) { c.IssuingCountry = "Norway" },
-		"unknown country":   func(c *Claimed) { c.IssuingCountry = "Atlantis" },
-		"missing doc no":    func(c *Claimed) { c.DocumentNumber = "" },
-		"missing dob":       func(c *Claimed) { c.DateOfBirth = "" },
-		"malformed date":    func(c *Claimed) { c.DateOfBirth = "07 MAR 1985" },
-		"missing expiry":    func(c *Claimed) { c.DateOfExpiry = "" },
-		"bad nationality":   func(c *Claimed) { c.Nationality = "??" },
-		"sex":               func(c *Claimed) { c.Sex = "M" },
-		"name digit suffix": func(c *Claimed) { c.FamilyName = c.FamilyName + "123" },
-		"doc number suffix": func(c *Claimed) { c.DocumentNumber = c.DocumentNumber + "#!" },
-		"doc number comma":  func(c *Claimed) { c.DocumentNumber = c.DocumentNumber + "," },
-		"doc number space":  func(c *Claimed) { c.DocumentNumber = c.DocumentNumber + " " },
-		"non-latin given":   func(c *Claimed) { c.GivenName = "Анна" },
+// An OCR value that differs from the chip no longer fails verification: the
+// credential is built from the chip (#83). The difference is reported by field
+// name only, for diagnostics.
+func TestVerify_OCRMismatchesAreReportedNotFatal(t *testing.T) {
+	cases := map[string]struct {
+		mutate func(*Claimed)
+		field  string // "" when nothing is compared
+	}{
+		"document number":   {func(c *Claimed) { c.DocumentNumber = "ZZ9999999" }, "document_number"},
+		"date of birth":     {func(c *Claimed) { c.DateOfBirth = "1985-03-08" }, "date_of_birth"},
+		"date of expiry":    {func(c *Claimed) { c.DateOfExpiry = "2031-10-01" }, "date_of_expiry"},
+		"family name":       {func(c *Claimed) { c.FamilyName = "SVENSSON" }, "family_name"},
+		"given name":        {func(c *Claimed) { c.GivenName = "KARIN" }, "given_name"},
+		"nationality":       {func(c *Claimed) { c.Nationality = "NOR" }, "nationality"},
+		"issuing country":   {func(c *Claimed) { c.IssuingCountry = "Norway" }, "issuing_country"},
+		"unknown country":   {func(c *Claimed) { c.IssuingCountry = "Atlantis" }, "issuing_country"},
+		"malformed date":    {func(c *Claimed) { c.DateOfBirth = "07 MAR 1985" }, "date_of_birth"},
+		"bad nationality":   {func(c *Claimed) { c.Nationality = "??" }, "nationality"},
+		"sex":               {func(c *Claimed) { c.Sex = "M" }, "sex"},
+		"name digit suffix": {func(c *Claimed) { c.FamilyName = c.FamilyName + "123" }, "family_name"},
+		"doc number suffix": {func(c *Claimed) { c.DocumentNumber = c.DocumentNumber + "#!" }, "document_number"},
+		"doc number comma":  {func(c *Claimed) { c.DocumentNumber = c.DocumentNumber + "," }, "document_number"},
+		"doc number space":  {func(c *Claimed) { c.DocumentNumber = c.DocumentNumber + " " }, "document_number"},
+		"non-latin given":   {func(c *Claimed) { c.GivenName = "Анна" }, "given_name"},
+		// The tester's case: an MRZ '<' filler read as a letter.
+		"filler read as K": {func(c *Claimed) { c.FamilyName = c.FamilyName + "K" }, "family_name"},
+		"missing doc no":   {func(c *Claimed) { c.DocumentNumber = "" }, ""},
+		"missing dob":      {func(c *Claimed) { c.DateOfBirth = "" }, ""},
+		"missing expiry":   {func(c *Claimed) { c.DateOfExpiry = "" }, ""},
 	}
-	for name, mutate := range cases {
+	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			c := emrtdtest.New(emrtdtest.Options{})
-			cl := base(c)
-			mutate(&cl)
+			cl := claimedFor(c)
+			tc.mutate(&cl)
 			res := Verify(c.Raw, cl)
-			assert.False(t, res.OK)
-			assert.Equal(t, ReasonMRZMismatch, res.Reason)
-			assert.NotContains(t, res.Detail, c.DocumentNumber, "detail must not echo personal data")
+			require.True(t, res.OK, res.Detail)
+			if tc.field == "" {
+				assert.Empty(t, res.Mismatches)
+			} else {
+				assert.Equal(t, []string{tc.field}, res.Mismatches)
+			}
+			// The identity is the chip's, whatever the OCR said.
+			assert.Equal(t, c.FamilyName, res.Identity.FamilyName)
+			assert.Equal(t, c.GivenName, res.Identity.GivenName)
+			assert.Equal(t, c.DocumentNumber, res.Identity.DocumentNumber)
+			assert.Equal(t, c.DateOfBirth, res.Identity.DateOfBirth)
 		})
+	}
+}
+
+func TestVerify_IdentityFromDG1(t *testing.T) {
+	c := emrtdtest.New(emrtdtest.Options{})
+	res := Verify(c.Raw, claimedFor(c))
+	require.True(t, res.OK, res.Detail)
+	assert.Equal(t, &Identity{
+		FamilyName:     "ERIKSSON",
+		GivenName:      "ANNA MARIA",
+		DocumentNumber: "AB1234567",
+		DateOfBirth:    "1985-03-07",
+		DateOfExpiry:   "2031-09-30",
+		Nationality:    "SWE",
+		IssuingState:   "SWE",
+		Sex:            "F",
+		DocumentCode:   "P",
+	}, res.Identity)
+	assert.Empty(t, res.Mismatches)
+}
+
+func TestVerify_IdentitySexUnspecified(t *testing.T) {
+	c := emrtdtest.New(emrtdtest.Options{DG1Sex: "<"})
+	res := Verify(c.Raw, claimedFor(c))
+	require.True(t, res.OK, res.Detail)
+	assert.Empty(t, res.Identity.Sex)
+}
+
+// DG11 carries the name in full where DG1 may truncate it, and the date of
+// birth with its century.
+func TestVerify_IdentityRefinedByDG11(t *testing.T) {
+	c := emrtdtest.New(emrtdtest.Options{
+		DG11Name:            "ERIKSSON<LINDQVIST<<ANNA<MARIA<SOFIA",
+		DG11FullDateOfBirth: "19850307",
+	})
+	res := Verify(c.Raw, claimedFor(c))
+	require.True(t, res.OK, res.Detail)
+	assert.Contains(t, res.DataGroups, 11)
+	assert.Equal(t, "ERIKSSON LINDQVIST", res.Identity.FamilyName)
+	assert.Equal(t, "ANNA MARIA SOFIA", res.Identity.GivenName)
+	assert.Equal(t, "1985-03-07", res.Identity.DateOfBirth)
+	assert.Equal(t, []string{"name", "date_of_birth"}, res.Identity.FromDG11)
+}
+
+func TestVerify_DG11DateOfBirthContradictingDG1IsIgnored(t *testing.T) {
+	c := emrtdtest.New(emrtdtest.Options{DG11FullDateOfBirth: "19850308"})
+	res := Verify(c.Raw, claimedFor(c))
+	require.True(t, res.OK, res.Detail)
+	assert.Equal(t, "1985-03-07", res.Identity.DateOfBirth)
+	assert.Empty(t, res.Identity.FromDG11)
+}
+
+func TestMRZDateToISO(t *testing.T) {
+	now = func() time.Time { return time.Date(2026, 10, 13, 12, 0, 0, 0, time.UTC) }
+	t.Cleanup(func() { now = time.Now })
+	cases := []struct {
+		mrz   string
+		birth bool
+		want  string
+		ok    bool
+	}{
+		{"850307", true, "1985-03-07", true},
+		{"200307", true, "2020-03-07", true},
+		{"261014", true, "1926-10-14", true}, // tomorrow in 2026 is the future: previous century
+		{"310930", false, "2031-09-30", true},
+		{"85<<<<", true, "", false},
+		{"850230", true, "", false},
+		{"8503", true, "", false},
+	}
+	for _, tc := range cases {
+		got, ok := mrzDateToISO(tc.mrz, tc.birth)
+		assert.Equal(t, tc.ok, ok, tc.mrz)
+		assert.Equal(t, tc.want, got, tc.mrz)
 	}
 }
 

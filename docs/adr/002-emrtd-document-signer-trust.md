@@ -20,7 +20,7 @@ Split the work across three roles (shared contract for the emrtd effort):
 
 | Role | Component | Responsibility |
 |------|-----------|----------------|
-| PEP | facetec-api (`internal/emrtd`) | Parse the SOD from `documentData.nfcValues.rawData`, verify the CMS signature with the embedded DSC, verify every presented data group against the SOD, cross-check DG1 against the scanned MRZ fields and issuing state, normalise the issuing state to ISO alpha-3, then ask the PDP. Never uses FaceTec's `signingCertificate` / `wasSignedDataValidated`. gmrtd's embedded master lists are not used as trust. |
+| PEP | facetec-api (`internal/emrtd`) | Parse the SOD from `documentData.nfcValues.rawData`, verify the CMS signature with the embedded DSC, verify every presented data group against the SOD, check the signed document code against the reported document type, take the holder's identity from DG1 (and DG11 when present) instead of the scanned MRZ (#83; OCR differences are logged by field name only), normalise the issuing state to ISO alpha-3, then ask the PDP. Never uses FaceTec's `signingCertificate` / `wasSignedDataValidated`. gmrtd's embedded master lists are not used as trust. |
 | PDP | go-trust `emrtd` registry | Decide whether the DSC chains to an anchor in the reviewed CSCA list for the claimed state, evaluated at the SOD signing time. Does not see the SOD. |
 | Anchor list | emrtd-trust-anchors repo | The reviewed CSCA list and its maintenance tooling. |
 

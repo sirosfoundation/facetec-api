@@ -47,6 +47,21 @@ func (c *Client) assessChip(ctx context.Context, scan *facetec.ScanResult) *idve
 		Sex:            dd.Sex,
 		DocumentType:   dd.DocumentType,
 	})
+	// Once the SOD signature and the data-group hashes are verified, the
+	// identity the chip signed replaces FaceTec's OCR of the MRZ (#83): an OCR
+	// misread, e.g. a '<' filler read as a letter, must not reach the
+	// credential. This does not depend on the PDP's trust decision: data the
+	// chip signed is never worse than OCR of the page printed next to it.
+	if local := out.Local; local != nil && local.Identity != nil {
+		applyChipIdentity(&id.DocumentData, local.Identity)
+		id.ChipIdentityApplied = true
+		if len(local.Mismatches) > 0 && c.log != nil {
+			c.log.Info("chip identity differs from OCR; issuing from the chip",
+				zap.Strings("fields", local.Mismatches),
+				zap.String("doc_type", dd.DocumentType),
+			)
+		}
+	}
 	id.ChipTrusted = out.Trusted
 	id.ChipTrustReason = out.Reason
 	id.ChipDSCSHA256 = out.Local.DSCFingerprint()
@@ -82,6 +97,7 @@ func chipAuditFields(id facetec.IDScanResult) []zap.Field {
 		zap.Bool("chip_trusted", id.ChipTrusted),
 		zap.String("chip_trust_reason", id.ChipTrustReason),
 		zap.Int("chip_auth_status", id.ChipAuthStatus),
+		zap.Bool("chip_identity_applied", id.ChipIdentityApplied),
 		zap.String("chip_dsc_sha256", id.ChipDSCSHA256),
 		zap.String("chip_csca_sha256", id.ChipCSCASHA256),
 	}
@@ -97,4 +113,31 @@ func bindPortraitToChip(id *facetec.IDScanResult, verifiedDGs []int) {
 		return
 	}
 	id.DocumentData.Portrait = ""
+}
+
+// applyChipIdentity overwrites the OCR'd identity fields with the chip's
+// values. A field the chip did not carry in usable form keeps its OCR value.
+// Country codes are normalised to ISO 3166-1 alpha-3, so ICAO's "D" (Germany)
+// becomes "DEU" and maps to an alpha-2 code in the credential.
+func applyChipIdentity(dd *facetec.DocumentData, chip *emrtd.Identity) {
+	set := func(dst *string, v string) {
+		if v != "" {
+			*dst = v
+		}
+	}
+	set(&dd.FamilyName, chip.FamilyName)
+	set(&dd.GivenName, chip.GivenName)
+	set(&dd.DocumentNumber, chip.DocumentNumber)
+	set(&dd.DateOfBirth, chip.DateOfBirth)
+	set(&dd.DateOfExpiry, chip.DateOfExpiry)
+	set(&dd.Sex, chip.Sex)
+	set(&dd.Nationality, normalizedCountry(chip.Nationality))
+	set(&dd.IssuingCountry, normalizedCountry(chip.IssuingState))
+}
+
+func normalizedCountry(code string) string {
+	if a3, err := emrtd.NormalizeCountry(code); err == nil {
+		return a3
+	}
+	return code
 }

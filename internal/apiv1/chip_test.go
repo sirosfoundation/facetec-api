@@ -32,6 +32,15 @@ func (f *fakeEvaluator) EvaluateDSC(context.Context, emrtd.TrustRequest) (emrtd.
 
 // chipPayload is a completed process-request response whose documentData
 // carries real (synthetic) chip data and the matching MRZ-derived fields.
+// chipPayloadFor is a completed, chip-authenticated passport scan whose OCR'd
+// fields come from ocr and whose chip data comes from chip.
+func chipPayloadFor(t *testing.T, chip, ocr *emrtdtest.Chip) string {
+	t.Helper()
+	ocrChip := *ocr
+	ocrChip.Raw = chip.Raw
+	return chipPayload(t, &ocrChip, 4, true)
+}
+
 func chipPayload(t *testing.T, chip *emrtdtest.Chip, authStatus int, withChip bool) string {
 	t.Helper()
 	field := func(k, v string) map[string]any { return map[string]any{"fieldKey": k, "value": v} }
@@ -166,21 +175,80 @@ func TestAssessChip_FillsScanResult(t *testing.T) {
 	fields := chipAuditFields(scan.IDScan)
 	enc := zap.NewExample()
 	enc.Info("x", fields...) // must not panic
-	assert.Len(t, fields, 5)
+	assert.Len(t, fields, 6)
 }
 
-func TestAssessChip_MRZMismatchUntrusted(t *testing.T) {
+// An OCR'd field that differs from the chip no longer makes the chip
+// untrusted: the identity is taken from the chip instead (#83).
+func TestAssessChip_OCRMismatchIssuesFromChip(t *testing.T) {
 	chip := emrtdtest.New(emrtdtest.Options{})
 	c := &Client{chip: emrtd.NewChecker(&fakeEvaluator{dec: emrtd.TrustDecision{Trusted: true, CSCASHA256: "cafe"}}, false)}
 	scan := &facetec.ScanResult{IDScan: facetec.IDScanResult{
 		ChipRaw: chip.Raw,
 		DocumentData: facetec.DocumentData{
 			DocumentNumber: "SOMETHINGELSE", DateOfBirth: chip.DateOfBirth, DateOfExpiry: chip.DateOfExpiry,
+			FamilyName: chip.FamilyName + "K", GivenName: chip.GivenName, Nationality: "SWE",
 		},
 	}}
-	require.Nil(t, c.assessChip(t.Context(), scan), "not required: left to policy")
+	require.Nil(t, c.assessChip(t.Context(), scan))
+	assert.True(t, scan.IDScan.ChipTrusted)
+	assert.True(t, scan.IDScan.ChipIdentityApplied)
+	dd := scan.IDScan.DocumentData
+	assert.Equal(t, chip.DocumentNumber, dd.DocumentNumber)
+	assert.Equal(t, chip.FamilyName, dd.FamilyName)
+	assert.Equal(t, chip.GivenName, dd.GivenName)
+	assert.Equal(t, "SWE", dd.Nationality)
+	assert.Equal(t, "SWE", dd.IssuingCountry)
+	assert.Equal(t, "F", dd.Sex)
+}
+
+// The chip's identity is used even when the PDP does not trust the document
+// signer (e.g. an ID card, where trust is not required): its signature and
+// hashes were verified locally, so it is never worse than OCR.
+func TestAssessChip_IdentityAppliedWithoutPDPTrust(t *testing.T) {
+	chip := emrtdtest.New(emrtdtest.Options{DocumentCode: "ID"})
+	c := &Client{chip: emrtd.NewChecker(&fakeEvaluator{dec: emrtd.TrustDecision{Trusted: false, Code: "unknown_csca"}}, true)}
+	scan := &facetec.ScanResult{IDScan: facetec.IDScanResult{
+		ChipRaw:      chip.Raw,
+		DocumentData: facetec.DocumentData{DocumentType: "id_card", FamilyName: "WRONG"},
+	}}
+	require.Nil(t, c.assessChip(t.Context(), scan), "trust.required covers passports only")
 	assert.False(t, scan.IDScan.ChipTrusted)
-	assert.Equal(t, emrtd.ReasonMRZMismatch, scan.IDScan.ChipTrustReason)
+	assert.True(t, scan.IDScan.ChipIdentityApplied)
+	assert.Equal(t, chip.FamilyName, scan.IDScan.DocumentData.FamilyName)
+}
+
+// Without verified chip data the OCR values stay.
+func TestAssessChip_NoChipDataKeepsOCR(t *testing.T) {
+	c := &Client{chip: emrtd.NewChecker(&fakeEvaluator{}, false)}
+	scan := &facetec.ScanResult{IDScan: facetec.IDScanResult{
+		DocumentData: facetec.DocumentData{DocumentType: "dl", FamilyName: "OCR NAME"},
+	}}
+	require.Nil(t, c.assessChip(t.Context(), scan))
+	assert.False(t, scan.IDScan.ChipIdentityApplied)
+	assert.Equal(t, "OCR NAME", scan.IDScan.DocumentData.FamilyName)
+}
+
+// A passport whose OCR misread the name used to be refused as chip_untrusted
+// under trust.required; it now passes the chip gate (and reaches the policy).
+func TestProcessRequest_PassportWithMisreadNameNotRefused(t *testing.T) {
+	chip := emrtdtest.New(emrtdtest.Options{})
+	misread := *chip
+	misread.FamilyName = chip.FamilyName + "K"
+	pdp := &fakeEvaluator{dec: emrtd.TrustDecision{Trusted: true, CSCASHA256: "aa"}}
+	c, ctx := chipClient(t, chipPayloadFor(t, chip, &misread), pdp, true)
+	resp := process(t, c, ctx)
+	assert.Equal(t, string(idverrors.CodePolicyRejected), resp.CredentialIssueErrCode)
+}
+
+func TestApplyChipIdentity_GermanyD(t *testing.T) {
+	dd := facetec.DocumentData{FamilyName: "OCR", Nationality: "D", IssuingCountry: "Germany", DateOfBirth: "1990-01-01"}
+	applyChipIdentity(&dd, &emrtd.Identity{FamilyName: "MUSTERMANN", Nationality: "D", IssuingState: "D"})
+	assert.Equal(t, "MUSTERMANN", dd.FamilyName)
+	assert.Equal(t, "DEU", dd.Nationality)
+	assert.Equal(t, "DEU", dd.IssuingCountry)
+	assert.Equal(t, "1990-01-01", dd.DateOfBirth, "a field the chip did not carry keeps its OCR value")
+	assert.Equal(t, "DE", toISO3166Alpha2(dd.Nationality))
 }
 
 func TestSubmitIDScan_LegacyPathNeverChipTrusted(t *testing.T) {
