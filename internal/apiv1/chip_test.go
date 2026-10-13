@@ -241,6 +241,13 @@ func TestProcessRequest_PassportWithMisreadNameNotRefused(t *testing.T) {
 	assert.Equal(t, string(idverrors.CodePolicyRejected), resp.CredentialIssueErrCode)
 }
 
+func TestApplyChipIdentity_UnknownCountryCodeKeptAsSigned(t *testing.T) {
+	dd := facetec.DocumentData{Nationality: "SWE"}
+	applyChipIdentity(&dd, &emrtd.Identity{Nationality: "XXA", IssuingState: "UNO"})
+	assert.Equal(t, "XXA", dd.Nationality, "an ICAO code with no ISO 3166 equivalent stays as signed")
+	assert.Equal(t, "UNO", dd.IssuingCountry)
+}
+
 func TestApplyChipIdentity_GermanyD(t *testing.T) {
 	dd := facetec.DocumentData{FamilyName: "OCR", Nationality: "D", IssuingCountry: "Germany", DateOfBirth: "1990-01-01"}
 	applyChipIdentity(&dd, &emrtd.Identity{FamilyName: "MUSTERMANN", Nationality: "D", IssuingState: "D"})

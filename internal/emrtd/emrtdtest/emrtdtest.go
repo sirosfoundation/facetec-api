@@ -57,6 +57,10 @@ type Options struct {
 	DG11FullDateOfBirth string
 	// DG1Sex is the MRZ sex character. Default "F".
 	DG1Sex string
+	// DG1ExpiryYYMMDD, when set, replaces the MRZ expiry date field verbatim
+	// (its check digit is computed over it), e.g. "311399" for an impossible
+	// month.
+	DG1ExpiryYYMMDD string
 }
 
 // Chip is generated chip data plus the certificates involved.
@@ -273,6 +277,9 @@ func buildTD3(o Options, c *Chip) string {
 	l1 := code + pad(issuing, 3) + pad(name, 39)
 	doc := pad(c.DocumentNumber, 9)
 	dob, exp := yymmdd(c.DateOfBirth), yymmdd(c.DateOfExpiry)
+	if o.DG1ExpiryYYMMDD != "" {
+		exp = o.DG1ExpiryYYMMDD
+	}
 	opt := pad("", 14)
 	sex := o.DG1Sex
 	if sex == "" {

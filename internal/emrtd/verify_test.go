@@ -249,6 +249,25 @@ func TestVerify_IdentityFromDG1(t *testing.T) {
 	assert.Empty(t, res.Mismatches)
 }
 
+func TestVerify_IdentitySex(t *testing.T) {
+	for _, sex := range []string{"M", "F", "X"} {
+		c := emrtdtest.New(emrtdtest.Options{DG1Sex: sex})
+		res := Verify(c.Raw, Claimed{DocumentType: "passport"})
+		require.True(t, res.OK, res.Detail)
+		assert.Equal(t, sex, res.Identity.Sex)
+	}
+}
+
+// DG1's expiry date is required: it bounds the SOD signing time and gates
+// issuance, so an impossible one fails closed.
+func TestVerify_InvalidDG1ExpiryFails(t *testing.T) {
+	c := emrtdtest.New(emrtdtest.Options{DG1ExpiryYYMMDD: "311399"})
+	res := Verify(c.Raw, claimedFor(c))
+	assert.False(t, res.OK)
+	assert.Equal(t, ReasonDGMalformed, res.Reason)
+	assert.Nil(t, res.Identity)
+}
+
 func TestVerify_IdentitySexUnspecified(t *testing.T) {
 	c := emrtdtest.New(emrtdtest.Options{DG1Sex: "<"})
 	res := Verify(c.Raw, claimedFor(c))
