@@ -363,7 +363,41 @@ func TestAssessChip_TrustedPortraitBoundToDG2(t *testing.T) {
 	scan.IDScan.ChipPortrait = ""
 	scan.IDScan.DocumentData.Portrait = "swapped-crop"
 	require.Nil(t, c.assessChip(t.Context(), scan))
-	assert.Empty(t, scan.IDScan.DocumentData.Portrait, "a portrait the SOD does not cover is not issued under a trusted chip")
+	assert.Empty(t, scan.IDScan.DocumentData.Portrait, "a portrait the SOD does not cover is not issued with the chip's identity")
+}
+
+// The portrait follows the identity: a chip whose signature and hashes verify
+// but whose signer the PDP does not trust (an ID card, where trust is not
+// required) still replaces FaceTec's photoIDFaceCrop with the DG2 image, so
+// the credential never pairs the chip's name with a crop from the camera.
+func TestAssessChip_PortraitBoundToDG2WithoutPDPTrust(t *testing.T) {
+	chip := emrtdtest.New(emrtdtest.Options{DocumentCode: "ID"})
+	c := &Client{chip: emrtd.NewChecker(&fakeEvaluator{dec: emrtd.TrustDecision{Trusted: false, Code: "unknown_csca"}}, true)}
+	scan := &facetec.ScanResult{IDScan: facetec.IDScanResult{
+		ChipRaw:      chip.Raw,
+		ChipPortrait: "dg2-portrait",
+		DocumentData: facetec.DocumentData{DocumentType: "id_card", Portrait: "camera-crop"},
+	}}
+	require.Nil(t, c.assessChip(t.Context(), scan))
+	require.False(t, scan.IDScan.ChipTrusted)
+	require.True(t, scan.IDScan.ChipIdentityApplied)
+	assert.Equal(t, "dg2-portrait", scan.IDScan.DocumentData.Portrait)
+
+	scan.IDScan.ChipPortrait = ""
+	scan.IDScan.DocumentData.Portrait = "camera-crop"
+	require.Nil(t, c.assessChip(t.Context(), scan))
+	assert.Empty(t, scan.IDScan.DocumentData.Portrait, "no crop next to the chip's identity")
+}
+
+// Without verified chip data the portrait FaceTec supplied stays, like the
+// OCR'd fields (#85).
+func TestAssessChip_NoChipDataKeepsPortrait(t *testing.T) {
+	c := &Client{chip: emrtd.NewChecker(&fakeEvaluator{}, false)}
+	scan := &facetec.ScanResult{IDScan: facetec.IDScanResult{
+		DocumentData: facetec.DocumentData{DocumentType: "dl", Portrait: "camera-crop"},
+	}}
+	require.Nil(t, c.assessChip(t.Context(), scan))
+	assert.Equal(t, "camera-crop", scan.IDScan.DocumentData.Portrait)
 }
 
 func TestAssessChip_RequiredRejectsMalformedRawData(t *testing.T) {

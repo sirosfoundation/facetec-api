@@ -54,6 +54,7 @@ func (c *Client) assessChip(ctx context.Context, scan *facetec.ScanResult) *idve
 	// chip signed is never worse than OCR of the page printed next to it.
 	if local := out.Local; local != nil && local.Identity != nil {
 		applyChipIdentity(&id.DocumentData, local.Identity)
+		bindPortraitToChip(id, local.DataGroups)
 		id.ChipIdentityApplied = true
 		if len(local.Mismatches) > 0 && c.log != nil {
 			c.log.Info("chip identity differs from OCR; issuing from the chip",
@@ -70,9 +71,6 @@ func (c *Client) assessChip(ctx context.Context, scan *facetec.ScanResult) *idve
 	// Any sign of a chip read counts as presented, so an incomplete payload
 	// (status reported but SOD missing, stray raw fields) cannot dodge the gate.
 	presented := out.ChipPresented || id.ChipAuthStatus != 0 || len(id.ChipRaw) > 0 || id.NFCVerified
-	if out.Trusted {
-		bindPortraitToChip(id, out.Local.DataGroups)
-	}
 	// trust.required is enforced for passports (and for scans that reported no
 	// document type at all, which fail closed) only: the PDP's eMRTD registry
 	// covers ICAO 9303 travel documents, and other documents' chips (e.g. an
@@ -103,10 +101,13 @@ func chipAuditFields(id facetec.IDScanResult) []zap.Field {
 	}
 }
 
-// bindPortraitToChip makes sure a chip-trusted scan only carries a portrait
-// the SOD vouches for. When DG2's hash was verified, the DG2 face image
-// replaces whatever FaceTec supplied (e.g. photoIDFaceCrop); when it was not,
-// the portrait is dropped rather than issued under a chip-trusted credential.
+// bindPortraitToChip makes sure a scan issued with the chip's identity only
+// carries a portrait the SOD vouches for, whether or not the PDP trusts the
+// signer: the portrait follows the same source as the name and dates. When
+// DG2's hash was verified, the DG2 face image replaces whatever FaceTec
+// supplied (e.g. photoIDFaceCrop, cropped from the camera image of the
+// document); when it was not, the portrait is dropped rather than issued
+// next to the chip's identity.
 func bindPortraitToChip(id *facetec.IDScanResult, verifiedDGs []int) {
 	if slices.Contains(verifiedDGs, 2) && id.ChipPortrait != "" {
 		id.DocumentData.Portrait = id.ChipPortrait
