@@ -254,8 +254,38 @@ func TestApplyChipIdentity_GermanyD(t *testing.T) {
 	assert.Equal(t, "MUSTERMANN", dd.FamilyName)
 	assert.Equal(t, "DEU", dd.Nationality)
 	assert.Equal(t, "DEU", dd.IssuingCountry)
-	assert.Equal(t, "1990-01-01", dd.DateOfBirth, "a field the chip did not carry keeps its OCR value")
+	assert.Empty(t, dd.DateOfBirth, "a field the chip leaves empty is not filled from OCR")
 	assert.Equal(t, "DE", toISO3166Alpha2(dd.Nationality))
+}
+
+// The chip is authoritative for the fields it leaves empty too: a holder with
+// a single name, a date of birth with unknown parts and an unspecified sex are
+// issued as such, never completed from the OCR'd values.
+func TestAssessChip_EmptyChipFieldsNotFilledFromOCR(t *testing.T) {
+	chip := emrtdtest.New(emrtdtest.Options{NoGivenName: true, DG1BirthYYMMDD: "85<<<<", DG1Sex: "<"})
+	c := &Client{chip: emrtd.NewChecker(&fakeEvaluator{dec: emrtd.TrustDecision{Trusted: true, CSCASHA256: "cafe"}}, true)}
+	scan := &facetec.ScanResult{IDScan: facetec.IDScanResult{
+		ChipRaw: chip.Raw,
+		DocumentData: facetec.DocumentData{
+			DocumentType: "passport", FamilyName: chip.FamilyName, GivenName: "OCR GIVEN",
+			DocumentNumber: chip.DocumentNumber, DateOfBirth: "1985-01-01", DateOfExpiry: chip.DateOfExpiry,
+			Sex: "M", Nationality: "SWE",
+		},
+	}}
+	require.Nil(t, c.assessChip(t.Context(), scan))
+	require.True(t, scan.IDScan.ChipIdentityApplied)
+	dd := scan.IDScan.DocumentData
+	assert.Equal(t, chip.FamilyName, dd.FamilyName)
+	assert.Empty(t, dd.GivenName)
+	assert.Empty(t, dd.DateOfBirth)
+	assert.Empty(t, dd.Sex)
+
+	claims := MapPhotoIDClaims(dd, "ft-abc", PhotoIDIssuer{}, photoIDNow)
+	assert.Equal(t, "", claims["given_name_unicode"])
+	assert.Equal(t, 0, claims["sex"], "ISO/IEC 5218 not known")
+	for _, k := range []string{"birth_date", "age_over_18", "age_in_years", "age_birth_year"} {
+		assert.NotContains(t, claims, k)
+	}
 }
 
 func TestSubmitIDScan_LegacyPathNeverChipTrusted(t *testing.T) {

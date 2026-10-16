@@ -115,24 +115,24 @@ func bindPortraitToChip(id *facetec.IDScanResult, verifiedDGs []int) {
 	id.DocumentData.Portrait = ""
 }
 
-// applyChipIdentity overwrites the OCR'd identity fields with the chip's
-// values. A field the chip did not carry in usable form keeps its OCR value.
+// applyChipIdentity replaces the OCR'd identity fields with the chip's values.
+// The chip is authoritative for every one of them, including the ones it
+// leaves empty: a holder with a single name has no given name, an MRZ date of
+// birth with unknown parts (e.g. "85<<<<") yields none, and an unspecified sex
+// ('<') is unknown. An empty field is left out of the credential rather than
+// filled from OCR, which is trivially falsifiable (#83, #85).
 // Country codes are normalised to ISO 3166-1 alpha-3, so ICAO's "D" (Germany)
-// becomes "DEU" and maps to an alpha-2 code in the credential.
+// becomes "DEU" and maps to an alpha-2 code in the credential; a code with no
+// ISO 3166 equivalent stays as signed.
 func applyChipIdentity(dd *facetec.DocumentData, chip *emrtd.Identity) {
-	set := func(dst *string, v string) {
-		if v != "" {
-			*dst = v
-		}
-	}
-	set(&dd.FamilyName, chip.FamilyName)
-	set(&dd.GivenName, chip.GivenName)
-	set(&dd.DocumentNumber, chip.DocumentNumber)
-	set(&dd.DateOfBirth, chip.DateOfBirth)
-	set(&dd.DateOfExpiry, chip.DateOfExpiry)
-	set(&dd.Sex, chip.Sex)
-	set(&dd.Nationality, normalizedCountry(chip.Nationality))
-	set(&dd.IssuingCountry, normalizedCountry(chip.IssuingState))
+	dd.FamilyName = chip.FamilyName
+	dd.GivenName = chip.GivenName
+	dd.DocumentNumber = chip.DocumentNumber
+	dd.DateOfBirth = chip.DateOfBirth
+	dd.DateOfExpiry = chip.DateOfExpiry
+	dd.Sex = chip.Sex
+	dd.Nationality = normalizedCountry(chip.Nationality)
+	dd.IssuingCountry = normalizedCountry(chip.IssuingState)
 }
 
 func normalizedCountry(code string) string {

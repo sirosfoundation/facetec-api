@@ -354,8 +354,12 @@ credential's identity fields come from the chip, not from FaceTec's OCR of the M
 names, document number, dates of birth and expiry, nationality, issuing state and sex from DG1
 (the signed MRZ), refined by DG11 (full name, date of birth with century) when the chip carries
 it. This holds whether or not the PDP trusts the signer, since signed chip data is never worse
-than OCR. Where the OCR differed, the fields are logged by name (never values). Documents without
-an ICAO chip (e.g. an ISO 18013 driving licence) keep the OCR values.
+than OCR. The chip is authoritative for every identity field, including the ones it leaves empty:
+a holder with a single name gets no given name, an MRZ date of birth with unknown parts (e.g.
+`85<<<<`) gives no `birth_date` or age claims, and an unspecified sex is issued as ISO/IEC 5218
+`0` (not known); none of these is filled in from OCR. Where the OCR differed, the fields are
+logged by name (never values). Documents without an ICAO chip (e.g. an ISO 18013 driving
+licence) keep the OCR values for now (#85).
 
 ## ETSI 119 461 §4.5 Compliance
 

@@ -57,6 +57,12 @@ type Options struct {
 	DG11FullDateOfBirth string
 	// DG1Sex is the MRZ sex character. Default "F".
 	DG1Sex string
+	// NoGivenName encodes a holder with a single name (primary identifier
+	// only, "ERIKSSON<<").
+	NoGivenName bool
+	// DG1BirthYYMMDD, when set, replaces the MRZ date of birth field verbatim
+	// (its check digit is computed over it), e.g. "85<<<<" for unknown parts.
+	DG1BirthYYMMDD string
 	// DG1ExpiryYYMMDD, when set, replaces the MRZ expiry date field verbatim
 	// (its check digit is computed over it), e.g. "311399" for an impossible
 	// month.
@@ -141,6 +147,9 @@ func New(o Options) *Chip {
 		DateOfExpiry:   "2031-09-30",
 		FamilyName:     "ERIKSSON",
 		GivenName:      "ANNA MARIA",
+	}
+	if o.NoGivenName {
+		c.GivenName = ""
 	}
 
 	cscaKey := must(ecdsa.GenerateKey(elliptic.P256(), rand.Reader))
@@ -279,6 +288,9 @@ func buildTD3(o Options, c *Chip) string {
 	dob, exp := yymmdd(c.DateOfBirth), yymmdd(c.DateOfExpiry)
 	if o.DG1ExpiryYYMMDD != "" {
 		exp = o.DG1ExpiryYYMMDD
+	}
+	if o.DG1BirthYYMMDD != "" {
+		dob = o.DG1BirthYYMMDD
 	}
 	opt := pad("", 14)
 	sex := o.DG1Sex
