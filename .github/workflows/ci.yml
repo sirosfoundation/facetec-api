@@ -29,6 +29,7 @@ jobs:
           GOWORK=off go test -race \
             -covermode=atomic \
             -coverprofile=coverage.out \
+            ./cmd/server/... \
             ./internal/apiv1/... \
             ./internal/auditlog/... \
             ./internal/config/... \

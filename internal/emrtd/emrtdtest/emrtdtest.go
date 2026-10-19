@@ -50,6 +50,23 @@ type Options struct {
 	DocumentCode string
 	// TwoSigners emits two SignerInfos.
 	TwoSigners bool
+	// DG11Name, when set, adds a DG11 (additional personal details) carrying
+	// this full name in MRZ form, e.g. "ERIKSSON<LINDQVIST<<ANNA<MARIA<SOFIA".
+	DG11Name string
+	// DG11FullDateOfBirth, when set, adds it (YYYYMMDD) to DG11.
+	DG11FullDateOfBirth string
+	// DG1Sex is the MRZ sex character. Default "F".
+	DG1Sex string
+	// NoGivenName encodes a holder with a single name (primary identifier
+	// only, "ERIKSSON<<").
+	NoGivenName bool
+	// DG1BirthYYMMDD, when set, replaces the MRZ date of birth field verbatim
+	// (its check digit is computed over it), e.g. "85<<<<" for unknown parts.
+	DG1BirthYYMMDD string
+	// DG1ExpiryYYMMDD, when set, replaces the MRZ expiry date field verbatim
+	// (its check digit is computed over it), e.g. "311399" for an impossible
+	// month.
+	DG1ExpiryYYMMDD string
 }
 
 // Chip is generated chip data plus the certificates involved.
@@ -131,6 +148,9 @@ func New(o Options) *Chip {
 		FamilyName:     "ERIKSSON",
 		GivenName:      "ANNA MARIA",
 	}
+	if o.NoGivenName {
+		c.GivenName = ""
+	}
 
 	cscaKey := must(ecdsa.GenerateKey(elliptic.P256(), rand.Reader))
 	dscKey := must(ecdsa.GenerateKey(elliptic.P256(), rand.Reader))
@@ -170,6 +190,10 @@ func New(o Options) *Chip {
 
 	hashes := [][]byte{seq(der(2), der(hash(dg2)))}
 	rawData := map[string]string{"DG2": base64.StdEncoding.EncodeToString(dg2)}
+	if dg11 := buildDG11(o); dg11 != nil {
+		hashes = append(hashes, seq(der(11), der(hash(dg11))))
+		rawData["DG11"] = base64.StdEncoding.EncodeToString(dg11)
+	}
 	if !o.OmitDG1 {
 		hashes = append([][]byte{seq(der(1), der(hash(dg1)))}, hashes...)
 		rawData["DG1"] = base64.StdEncoding.EncodeToString(dg1)
@@ -262,8 +286,18 @@ func buildTD3(o Options, c *Chip) string {
 	l1 := code + pad(issuing, 3) + pad(name, 39)
 	doc := pad(c.DocumentNumber, 9)
 	dob, exp := yymmdd(c.DateOfBirth), yymmdd(c.DateOfExpiry)
+	if o.DG1ExpiryYYMMDD != "" {
+		exp = o.DG1ExpiryYYMMDD
+	}
+	if o.DG1BirthYYMMDD != "" {
+		dob = o.DG1BirthYYMMDD
+	}
 	opt := pad("", 14)
-	l2 := doc + cd(doc) + pad(o.Nationality, 3) + dob + cd(dob) + "F" + exp + cd(exp) + opt + cd(opt)
+	sex := o.DG1Sex
+	if sex == "" {
+		sex = "F"
+	}
+	l2 := doc + cd(doc) + pad(o.Nationality, 3) + dob + cd(dob) + sex + exp + cd(exp) + opt + cd(opt)
 	composite := l2[0:10] + l2[13:20] + l2[21:43]
 	return l1 + l2 + cd(composite)
 }
@@ -283,4 +317,33 @@ func cd(s string) string {
 		sum += v * w[i%3]
 	}
 	return strconv.Itoa(sum % 10)
+}
+
+// buildDG11 encodes ICAO 9303-10 DG11 (tag 6B) with a tag list (5C) and the
+// requested elements: full name (5F0E) and full date of birth (5F2B).
+// It returns nil when no DG11 element was requested.
+func buildDG11(o Options) []byte {
+	type element struct {
+		tag   [2]byte
+		value string
+	}
+	var elems []element
+	if o.DG11Name != "" {
+		elems = append(elems, element{[2]byte{0x5F, 0x0E}, o.DG11Name})
+	}
+	if o.DG11FullDateOfBirth != "" {
+		elems = append(elems, element{[2]byte{0x5F, 0x2B}, o.DG11FullDateOfBirth})
+	}
+	if len(elems) == 0 {
+		return nil
+	}
+	var tagList, body []byte
+	for _, e := range elems {
+		tagList = append(tagList, e.tag[:]...)
+		body = append(body, e.tag[0], e.tag[1], byte(len(e.value)))
+		body = append(body, []byte(e.value)...)
+	}
+	content := append([]byte{0x5C, byte(len(tagList))}, tagList...)
+	content = append(content, body...)
+	return tlv(0x6B, content)
 }

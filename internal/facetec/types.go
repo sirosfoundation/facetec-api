@@ -76,6 +76,10 @@ type IDScanResult struct {
 	ChipTrusted bool `json:"chipTrusted"`
 	// ChipTrustReason is a machine-readable reason code ("ok" when trusted).
 	ChipTrustReason string `json:"chipTrustReason,omitempty"`
+	// ChipIdentityApplied is true when the identity fields of DocumentData
+	// were replaced by the values signed on the chip (DG1, and DG11 when
+	// present). Set by the caller (see apiv1), never by ExtractScanResult.
+	ChipIdentityApplied bool `json:"chipIdentityApplied"`
 	// ChipDSCSHA256 and ChipCSCASHA256 are hex fingerprints of the document
 	// signer and anchor certificates, kept for the audit record.
 	ChipDSCSHA256  string `json:"chipDscSha256,omitempty"`

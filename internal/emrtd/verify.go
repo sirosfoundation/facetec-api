@@ -50,7 +50,6 @@ const (
 	ReasonDGHashMismatch = "dg_hash_mismatch"
 	ReasonDGNotInSOD     = "dg_not_in_sod"
 	ReasonDG1Missing     = "dg1_missing"
-	ReasonMRZMismatch    = "mrz_mismatch"
 	ReasonUnknownIssuer  = "unknown_issuing_state"
 	ReasonSigningTime    = "signing_time_implausible"
 	// ReasonDocTypeMismatch: the signed DG1 document code contradicts the
@@ -73,12 +72,15 @@ const (
 	maxDataGroupBytes = 4 << 20
 	sodKey            = "SOD"
 	dg1Key            = "DG1"
+	dg11Key           = "DG11"
 )
 
 var dgKeyRe = regexp.MustCompile(`^DG([0-9]{1,2})$`)
 
-// Claimed carries the document fields FaceTec reported (and that the credential
-// will be built from). They are cross-checked against the chip's DG1.
+// Claimed carries the document fields FaceTec reported from OCR. Verify
+// compares them with the chip's DG1 for diagnostics (Result.Mismatches); only
+// the document type must agree, because it selects the policy rule. The
+// credential is built from the chip's own values (Result.Identity).
 type Claimed struct {
 	GivenName      string
 	FamilyName     string
@@ -112,6 +114,34 @@ type Result struct {
 	SigningTime *time.Time
 	// DataGroups lists the data group numbers whose hashes were verified.
 	DataGroups []int
+	// Identity is the holder's identity as signed on the chip (DG1, refined by
+	// DG11 when present). Set only when OK.
+	Identity *Identity
+	// Mismatches names the fields where FaceTec's OCR differed from the chip
+	// ("family_name", "date_of_birth", ...). Diagnostic only, never values.
+	Mismatches []string
+}
+
+// Identity is the holder's identity read from the chip, after the SOD
+// signature and the data-group hashes were verified. Names and dates come from
+// DG1 (the signed MRZ); DG11, when the chip carries it, supplies the full,
+// untruncated name and the date of birth with its century. A field the chip
+// does not carry in usable form is empty.
+type Identity struct {
+	FamilyName     string
+	GivenName      string
+	DocumentNumber string
+	DateOfBirth    string // YYYY-MM-DD
+	DateOfExpiry   string // YYYY-MM-DD
+	// Nationality and IssuingState are the MRZ codes as signed (ISO 3166-1
+	// alpha-3, or an ICAO code such as "D").
+	Nationality  string
+	IssuingState string
+	Sex          string // M, F or X; empty when unspecified
+	// DocumentCode is the MRZ document code, e.g. "P" or "ID".
+	DocumentCode string
+	// FromDG11 lists the fields DG11 supplied ("name", "date_of_birth").
+	FromDG11 []string
 }
 
 // DSCFingerprint returns the hex SHA-256 of the DSC, or "".
@@ -171,17 +201,23 @@ func Verify(raw map[string]string, claimed Claimed) *Result {
 		return fail(ReasonUnknownIssuer, "DG1 issuing state %q is not a known ISO 3166-1 alpha-3 code", dg1.Mrz.IssuingState)
 	}
 
-	if err := crossCheckMRZ(dg1, claimed); err != nil {
-		if errors.Is(err, errDocTypeMismatch) {
-			return fail(ReasonDocTypeMismatch, "%v", err)
-		}
-		return fail(ReasonMRZMismatch, "%v", err)
+	// The reported document type selects the policy rule (and trust scope),
+	// so it must agree with the signed document code.
+	if err := crossCheckDocumentType(dg1.Mrz, claimed.DocumentType); err != nil {
+		return fail(ReasonDocTypeMismatch, "%v", err)
 	}
-	if err := plausibleSigningTime(signingTime, claimed.DateOfExpiry); err != nil {
+
+	identity, err := identityFromChip(dg1, raw, dgs)
+	if err != nil {
+		return fail(ReasonDGMalformed, "%v", err)
+	}
+	if err := plausibleSigningTime(signingTime, identity.DateOfExpiry); err != nil {
 		return fail(ReasonSigningTime, "%v", err)
 	}
 
 	return &Result{
+		Identity:     identity,
+		Mismatches:   mrzMismatches(dg1, claimed),
 		OK:           true,
 		Reason:       ReasonOK,
 		DSC:          dsc,
@@ -436,42 +472,119 @@ func resolveClaimedCountry(s string) (string, error) {
 	return "", fmt.Errorf("unknown country %q", s)
 }
 
-// crossCheckMRZ compares DG1 with the fields FaceTec reported. Document
-// number, date of birth and date of expiry are mandatory in the claim (they
-// bind the chip to the credential); the remaining fields are compared when
-// the claim carries them. The error never echoes personal data.
-func crossCheckMRZ(dg1 *document.DG1, c Claimed) error {
+// mrzMismatches lists the fields where FaceTec's OCR (the claim) differs from
+// the chip's DG1. The credential is built from the chip, so these no longer
+// fail verification; they are reported for diagnostics (an OCR misread of the
+// MRZ, typically a '<' filler read as a letter). A field the claim leaves
+// empty is not compared. Only field names are returned, never values.
+func mrzMismatches(dg1 *document.DG1, c Claimed) []string {
 	m := dg1.Mrz
-
-	if err := crossCheckDocumentType(m, c.DocumentType); err != nil {
-		return err
+	var out []string
+	if c.DocumentNumber != "" && !equalAlnum(m.DocumentNumber, c.DocumentNumber) {
+		out = append(out, "document_number")
 	}
-
-	if c.DocumentNumber == "" || c.DateOfBirth == "" || c.DateOfExpiry == "" {
-		return errors.New("claimed document number/date of birth/date of expiry missing")
+	if c.DateOfBirth != "" && !sameMRZDate(m.DateOfBirth, c.DateOfBirth, true) {
+		out = append(out, "date_of_birth")
 	}
-	if !equalAlnum(m.DocumentNumber, c.DocumentNumber) {
-		return errors.New("document number differs between chip and scan")
+	if c.DateOfExpiry != "" && !sameMRZDate(m.DateOfExpiry, c.DateOfExpiry, false) {
+		out = append(out, "date_of_expiry")
 	}
-	if !sameMRZDate(m.DateOfBirth, c.DateOfBirth, true) {
-		return errors.New("date of birth differs between chip and scan")
-	}
-	if !sameMRZDate(m.DateOfExpiry, c.DateOfExpiry, false) {
-		return errors.New("date of expiry differs between chip and scan")
-	}
-	if err := crossCheckNames(m, c); err != nil {
-		return err
+	if m.NameOfHolder != nil {
+		if c.FamilyName != "" && !equalAlpha(m.NameOfHolder.Primary, c.FamilyName) {
+			out = append(out, "family_name")
+		}
+		if c.GivenName != "" && !equalAlpha(m.NameOfHolder.Secondary, c.GivenName) {
+			out = append(out, "given_name")
+		}
 	}
 	if c.Sex != "" && normalizeSex(m.Sex) != normalizeSex(c.Sex) {
-		return errors.New("sex differs between chip and scan")
+		out = append(out, "sex")
 	}
 	if c.Nationality != "" && !sameCountry(m.Nationality, c.Nationality) {
-		return errors.New("nationality differs between chip and scan")
+		out = append(out, "nationality")
 	}
 	if c.IssuingCountry != "" && !sameCountry(m.IssuingState, c.IssuingCountry) {
-		return errors.New("issuing state differs between chip and scan")
+		out = append(out, "issuing_country")
 	}
-	return nil
+	return out
+}
+
+// identityFromChip reads the holder's identity from the verified DG1, refined
+// by DG11 when the chip presented it (its hash was verified with the other
+// data groups). DG1's expiry date is required: it bounds the SOD signing time
+// and gates issuance. Other unusable DG1 values are left empty; DG11 problems
+// are ignored, since DG1 is complete on its own.
+func identityFromChip(dg1 *document.DG1, raw map[string]string, verifiedDGs []int) (*Identity, error) {
+	m := dg1.Mrz
+	id := &Identity{
+		DocumentNumber: strings.TrimSpace(strings.Trim(m.DocumentNumber, "<")),
+		Nationality:    strings.TrimSpace(m.Nationality),
+		IssuingState:   strings.TrimSpace(m.IssuingState),
+		Sex:            chipSex(m.Sex),
+		DocumentCode:   strings.TrimSpace(strings.Trim(m.DocumentCode, "<")),
+	}
+	if m.NameOfHolder != nil {
+		id.FamilyName = cleanName(m.NameOfHolder.Primary)
+		id.GivenName = cleanName(m.NameOfHolder.Secondary)
+	}
+	if dob, ok := mrzDateToISO(m.DateOfBirth, true); ok {
+		id.DateOfBirth = dob
+	}
+	expiry, ok := mrzDateToISO(m.DateOfExpiry, false)
+	if !ok {
+		return nil, errors.New("DG1 date of expiry is not a valid date")
+	}
+	id.DateOfExpiry = expiry
+
+	if slices.Contains(verifiedDGs, 11) {
+		if b, err := decodeDG(raw[dg11Key]); err == nil {
+			if dg11, err := document.NewDG11(b); err == nil && dg11 != nil {
+				refineFromDG11(id, dg11.Details)
+			}
+		}
+	}
+	return id, nil
+}
+
+// refineFromDG11 applies DG11's full name and full date of birth. The DG11
+// name is the holder's name in full where DG1 truncates it to fit the MRZ; its
+// date of birth carries the century DG1's YYMMDD lacks. A DG11 date of birth
+// that contradicts DG1's is ignored (DG1 is the mandatory, always-present one).
+func refineFromDG11(id *Identity, d document.PersonDetails) {
+	if d.NameOfHolder != nil {
+		family, given := cleanName(d.NameOfHolder.Primary), cleanName(d.NameOfHolder.Secondary)
+		if family != "" {
+			id.FamilyName, id.GivenName = family, given
+			id.FromDG11 = append(id.FromDG11, "name")
+		}
+	}
+	if full := strings.TrimSpace(d.FullDateOfBirth); len(full) == 8 {
+		iso := full[:4] + "-" + full[4:6] + "-" + full[6:]
+		if _, err := time.Parse(isoDate, iso); err == nil && (id.DateOfBirth == "" || id.DateOfBirth[2:] == iso[2:]) {
+			id.DateOfBirth = iso
+			id.FromDG11 = append(id.FromDG11, "date_of_birth")
+		}
+	}
+}
+
+// cleanName turns an MRZ name component (gmrtd has already replaced '<' with
+// spaces) into single-space-separated words.
+func cleanName(s string) string {
+	return strings.Join(strings.Fields(strings.ReplaceAll(s, "<", " ")), " ")
+}
+
+// chipSex maps the MRZ sex field to M, F or X; '<' (unspecified) is empty.
+func chipSex(s string) string {
+	switch strings.ToUpper(strings.TrimSpace(s)) {
+	case "M":
+		return "M"
+	case "F":
+		return "F"
+	case "X":
+		return "X"
+	default:
+		return ""
+	}
 }
 
 // errDocTypeMismatch is returned when the claimed document type contradicts the
@@ -515,20 +628,6 @@ func normalizeSex(s string) string {
 	}
 }
 
-// crossCheckNames compares the holder name fields the claim carries.
-func crossCheckNames(m *mrz.MRZ, c Claimed) error {
-	if m.NameOfHolder == nil {
-		return nil
-	}
-	if c.FamilyName != "" && !equalAlpha(m.NameOfHolder.Primary, c.FamilyName) {
-		return errors.New("family name differs between chip and scan")
-	}
-	if c.GivenName != "" && !equalAlpha(m.NameOfHolder.Secondary, c.GivenName) {
-		return errors.New("given name differs between chip and scan")
-	}
-	return nil
-}
-
 // sameCountry reports whether an MRZ country code and a claimed country
 // denote the same state. Unresolvable values never match (fail closed).
 func sameCountry(mrzCode, claimed string) bool {
@@ -542,6 +641,28 @@ func sameCountry(mrzCode, claimed string) bool {
 
 // now is the clock used to resolve the MRZ century (overridable in tests).
 var now = time.Now
+
+// mrzDateToISO converts an MRZ YYMMDD date to YYYY-MM-DD, resolving the
+// century the same way sameMRZDate does: a date of birth is never in the future
+// (the latest century that is not in the future wins); an expiry date is 20YY.
+// It reports false for an incomplete or impossible date (e.g. "85<<<<").
+func mrzDateToISO(mrzDate string, birth bool) (string, bool) {
+	if len(mrzDate) != 6 {
+		return "", false
+	}
+	century := "20"
+	if birth {
+		t, err := time.Parse(isoDate, "20"+mrzDate[:2]+"-"+mrzDate[2:4]+"-"+mrzDate[4:6])
+		if err != nil || t.After(now()) {
+			century = "19"
+		}
+	}
+	iso := century + mrzDate[:2] + "-" + mrzDate[2:4] + "-" + mrzDate[4:6]
+	if _, err := time.Parse(isoDate, iso); err != nil {
+		return "", false
+	}
+	return iso, true
+}
 
 // sameMRZDate compares an MRZ YYMMDD date with a YYYY-MM-DD claim. The MRZ
 // does not encode the century, so it is resolved explicitly (fail closed):
