@@ -342,12 +342,26 @@ constrains `chip-trusted` must list the fields before it (`(* set true false)` m
 `nfc-verified` is FaceTec's own chip authentication (status 4: clone detection plus signature
 verification against the DSC embedded in the same chip); it proves the chip is genuine hardware
 holding intact data, not that the data was signed by a state we trust. `chip-trusted` is `true`
-only when facetec-api itself verified the SOD signature, every data-group hash and the DG1/MRZ
-cross-check, **and** the go-trust PDP trusts the DSC for the issuing state
+only when facetec-api itself verified the SOD signature and every data-group hash, the signed
+document code matches the reported document type, **and** the go-trust PDP trusts the DSC for the issuing state
 (see [ADR-002](docs/adr/002-emrtd-document-signer-trust.md)). Passports need both. Passports whose
 chips lack Active/Chip Authentication (status 1) are therefore refused by design; this is a known
 coverage trade-off. With `trust.required` (passports only), a scan that passes the NFC gate (status 4) but whose raw
 chip data is missing or untrusted is refused with `chip_untrusted`.
+
+**Identity from the chip.** Once the SOD signature and the data-group hashes are verified, the
+credential's identity fields come from the chip, not from FaceTec's OCR of the MRZ in the photo:
+names, document number, dates of birth and expiry, nationality, issuing state and sex from DG1
+(the signed MRZ), refined by DG11 (full name, date of birth with century) when the chip carries
+it. This holds whether or not the PDP trusts the signer, since signed chip data is never worse
+than OCR. The chip is authoritative for every identity field, including the ones it leaves empty:
+a holder with a single name gets no given name, an MRZ date of birth with unknown parts (e.g.
+`85<<<<`) gives no `birth_date` or age claims, and an unspecified sex is issued as ISO/IEC 5218
+`0` (not known); none of these is filled in from OCR. The portrait follows the same rule: it is
+the SOD-verified DG2 face image, never FaceTec's `photoIDFaceCrop` from the camera image, and is
+left out when DG2 was not verified. Where the OCR differed, the fields are
+logged by name (never values). Documents without an ICAO chip (e.g. an ISO 18013 driving
+licence) keep the OCR values and FaceTec's portrait for now (#85).
 
 ## ETSI 119 461 §4.5 Compliance
 

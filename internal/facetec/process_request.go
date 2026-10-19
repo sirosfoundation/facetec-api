@@ -142,10 +142,12 @@ func ExtractScanResult(payload map[string]any) (*ScanResult, bool, error) {
 	// parseFaceTecGroupedFields (extracted from the NFC chip's DG2 face
 	// image -- see extractPortraitFromDG2). Some FaceTec configurations may
 	// additionally return a separate, pre-cropped face photo directly under
-	// "photoIDFaceCrop"; prefer that when present, since it's already
-	// cropped/normalized, but don't clobber the NFC-derived portrait with an
-	// empty string when it's absent (confirmed absent in this deployment's
-	// FaceTec Server responses as of 2026-07-29).
+	// "photoIDFaceCrop" (confirmed absent in this deployment's FaceTec Server
+	// responses as of 2026-07-29); it is taken here, but it comes from the
+	// camera image of the document, not the chip. Whenever the chip's
+	// identity is applied, apiv1's bindPortraitToChip replaces it with the
+	// SOD-verified DG2 image kept in ChipPortrait, or drops it. Without a
+	// verified chip the crop stays (#85).
 	chipPortrait := extractPortraitFromDG2(documentDataMap(results["documentData"]))
 	if portrait, ok := lookupString(results["photoIDFaceCrop"]); ok {
 		documentData.Portrait = portrait

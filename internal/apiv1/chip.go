@@ -47,6 +47,22 @@ func (c *Client) assessChip(ctx context.Context, scan *facetec.ScanResult) *idve
 		Sex:            dd.Sex,
 		DocumentType:   dd.DocumentType,
 	})
+	// Once the SOD signature and the data-group hashes are verified, the
+	// identity the chip signed replaces FaceTec's OCR of the MRZ (#83): an OCR
+	// misread, e.g. a '<' filler read as a letter, must not reach the
+	// credential. This does not depend on the PDP's trust decision: data the
+	// chip signed is never worse than OCR of the page printed next to it.
+	if local := out.Local; local != nil && local.Identity != nil {
+		applyChipIdentity(&id.DocumentData, local.Identity)
+		bindPortraitToChip(id, local.DataGroups)
+		id.ChipIdentityApplied = true
+		if len(local.Mismatches) > 0 && c.log != nil {
+			c.log.Info("chip identity differs from OCR; issuing from the chip",
+				zap.Strings("fields", local.Mismatches),
+				zap.String("doc_type", dd.DocumentType),
+			)
+		}
+	}
 	id.ChipTrusted = out.Trusted
 	id.ChipTrustReason = out.Reason
 	id.ChipDSCSHA256 = out.Local.DSCFingerprint()
@@ -55,9 +71,6 @@ func (c *Client) assessChip(ctx context.Context, scan *facetec.ScanResult) *idve
 	// Any sign of a chip read counts as presented, so an incomplete payload
 	// (status reported but SOD missing, stray raw fields) cannot dodge the gate.
 	presented := out.ChipPresented || id.ChipAuthStatus != 0 || len(id.ChipRaw) > 0 || id.NFCVerified
-	if out.Trusted {
-		bindPortraitToChip(id, out.Local.DataGroups)
-	}
 	// trust.required is enforced for passports (and for scans that reported no
 	// document type at all, which fail closed) only: the PDP's eMRTD registry
 	// covers ICAO 9303 travel documents, and other documents' chips (e.g. an
@@ -82,19 +95,50 @@ func chipAuditFields(id facetec.IDScanResult) []zap.Field {
 		zap.Bool("chip_trusted", id.ChipTrusted),
 		zap.String("chip_trust_reason", id.ChipTrustReason),
 		zap.Int("chip_auth_status", id.ChipAuthStatus),
+		zap.Bool("chip_identity_applied", id.ChipIdentityApplied),
 		zap.String("chip_dsc_sha256", id.ChipDSCSHA256),
 		zap.String("chip_csca_sha256", id.ChipCSCASHA256),
 	}
 }
 
-// bindPortraitToChip makes sure a chip-trusted scan only carries a portrait
-// the SOD vouches for. When DG2's hash was verified, the DG2 face image
-// replaces whatever FaceTec supplied (e.g. photoIDFaceCrop); when it was not,
-// the portrait is dropped rather than issued under a chip-trusted credential.
+// bindPortraitToChip makes sure a scan issued with the chip's identity only
+// carries a portrait the SOD vouches for, whether or not the PDP trusts the
+// signer: the portrait follows the same source as the name and dates. When
+// DG2's hash was verified, the DG2 face image replaces whatever FaceTec
+// supplied (e.g. photoIDFaceCrop, cropped from the camera image of the
+// document); when it was not, the portrait is dropped rather than issued
+// next to the chip's identity.
 func bindPortraitToChip(id *facetec.IDScanResult, verifiedDGs []int) {
 	if slices.Contains(verifiedDGs, 2) && id.ChipPortrait != "" {
 		id.DocumentData.Portrait = id.ChipPortrait
 		return
 	}
 	id.DocumentData.Portrait = ""
+}
+
+// applyChipIdentity replaces the OCR'd identity fields with the chip's values.
+// The chip is authoritative for every one of them, including the ones it
+// leaves empty: a holder with a single name has no given name, an MRZ date of
+// birth with unknown parts (e.g. "85<<<<") yields none, and an unspecified sex
+// ('<') is unknown. An empty field is left out of the credential rather than
+// filled from OCR, which is trivially falsifiable (#83, #85).
+// Country codes are normalised to ISO 3166-1 alpha-3, so ICAO's "D" (Germany)
+// becomes "DEU" and maps to an alpha-2 code in the credential; a code with no
+// ISO 3166 equivalent stays as signed.
+func applyChipIdentity(dd *facetec.DocumentData, chip *emrtd.Identity) {
+	dd.FamilyName = chip.FamilyName
+	dd.GivenName = chip.GivenName
+	dd.DocumentNumber = chip.DocumentNumber
+	dd.DateOfBirth = chip.DateOfBirth
+	dd.DateOfExpiry = chip.DateOfExpiry
+	dd.Sex = chip.Sex
+	dd.Nationality = normalizedCountry(chip.Nationality)
+	dd.IssuingCountry = normalizedCountry(chip.IssuingState)
+}
+
+func normalizedCountry(code string) string {
+	if a3, err := emrtd.NormalizeCountry(code); err == nil {
+		return a3
+	}
+	return code
 }
