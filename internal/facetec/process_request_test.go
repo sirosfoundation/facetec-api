@@ -1,6 +1,7 @@
 package facetec
 
 import (
+	"fmt"
 	"testing"
 )
 
@@ -576,11 +577,13 @@ func TestExtractScanResult_ChipFaceMatchLevel(t *testing.T) {
 		}
 	})
 
-	t.Run("wrong type fails closed", func(t *testing.T) {
-		p := realPayload()
-		p["idScanResultsSoFar"].(map[string]any)["matchLevelNFCToFaceMap"] = "seven"
-		if _, _, err := ExtractScanResult(p); err == nil {
-			t.Error("want an error for a non-numeric matchLevelNFCToFaceMap")
-		}
-	})
+	for _, v := range []any{"seven", "7", 7.5, true} {
+		t.Run(fmt.Sprintf("wrong type %T %v fails closed", v, v), func(t *testing.T) {
+			p := realPayload()
+			p["idScanResultsSoFar"].(map[string]any)["matchLevelNFCToFaceMap"] = v
+			if _, _, err := ExtractScanResult(p); err == nil {
+				t.Errorf("want an error for matchLevelNFCToFaceMap %#v", v)
+			}
+		})
+	}
 }

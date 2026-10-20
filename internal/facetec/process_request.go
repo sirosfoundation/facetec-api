@@ -92,10 +92,10 @@ func ExtractScanResult(payload map[string]any) (*ScanResult, bool, error) {
 
 	// matchLevelNFCToFaceMap compares the live FaceMap with the photo on the
 	// document's chip (matchLevel compares it with the printed photo). Absent
-	// is kept apart from 0; a present value of the wrong type is an error
-	// (fail closed).
+	// is kept apart from 0; a present value of the wrong type, including a
+	// numeric string, is an error (fail closed), as in the legacy decoder.
 	var chipFaceMatchLevel *int
-	if level, present, err := lookupInt(results["matchLevelNFCToFaceMap"]); err != nil {
+	if level, present, err := lookupEnumInt(results["matchLevelNFCToFaceMap"]); err != nil {
 		return nil, false, fmt.Errorf("facetec: matchLevelNFCToFaceMap: %w", err)
 	} else if present {
 		chipFaceMatchLevel = &level

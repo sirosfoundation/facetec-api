@@ -31,6 +31,7 @@ technical and organisational measures (TOMs), and considerations relevant to GDP
 | **FaceMap** (server-computed biometric template) | Biometric data | In process memory only — never persisted |
 | **Liveness score** (float, 0.0–1.0) | Derived biometric indicator | In process memory only; logged at `Info` level without the score value |
 | **Face-match level** (integer, 0–10) | Derived biometric indicator | In process memory only; logged at `Debug` level only on policy rejection |
+| **Chip face-match level** (integer, 0–10, FaceTec `matchLevelNFCToFaceMap`) | Derived biometric indicator | In process memory; recorded as `chip_face_match_level` in the `credential_issued` audit event (`-1` when not reported). A refusal logs only whether a level was reported, not the level |
 | **ID scan image** (base64, from mobile SDK) | Biometric / documentary | In transit: HTTPS to facetec-api → FaceTec Server |
 | **ID front/back images** (base64) | Biometric / documentary | In transit: HTTPS to facetec-api → FaceTec Server |
 
@@ -123,6 +124,7 @@ zeroing guarantees: restrict access and retention, and delete them after debuggi
 - FaceMap (biometric template) — only forwarded to FaceTec Server, never to issuer or client
 - Liveness score — internal only
 - Face-match level — internal only; logged at `Debug` level on rejection
+- Chip face-match level — never sent to the issuer or client; recorded in the `credential_issued` audit event only
 - MRZ lines — stripped in code (`issueCredential()`) before any forwarding
 
 ---
@@ -137,7 +139,7 @@ zeroing guarantees: restrict access and retention, and delete them after debuggi
 | Signed credential | Process RAM (`session.Manager.offers`) | `session.offer_ttl` (default **5 min**) | Deleted atomically on first `GET /v1/offer/:txid`; TTL eviction |
 | Request logs | Log sink (operator-configured) | Operator's log retention policy | No personal data in log fields; see §2.3 |
 | Opt-in document debug logs (development only) | Log sink | Operator-controlled; delete after debugging | May contain document PII only when both Debug logging and `logging.include_pii` are enabled; see §2.4 |
-| Audit log event (`credential_issued`) | Log sink | Operator's log retention policy | Contains: tenant ID, transaction ID, doc type, format, scope, chip trust outcome and reason code, FaceTec `chip_auth_status`, DSC/CSCA certificate fingerprints — **no name, MRZ or biometric data** (the SOD signing time is not logged) |
+| Audit log event (`credential_issued`) | Log sink | Operator's log retention policy | Contains: tenant ID, transaction ID, doc type, format, scope, chip trust outcome and reason code, FaceTec `chip_auth_status`, the chip face-match level (`chip_face_match_level`, an integer 0–10), DSC/CSCA certificate fingerprints — **no name, MRZ, image or biometric template** (the SOD signing time is not logged). The chip face-match level is a derived biometric indicator, kept as evidence that the gate passed; it identifies no one on its own |
 
 > **Note:** facetec-api has no database and no persistent storage of any kind. All data described
 > above is held exclusively in process heap memory. A process restart or graceful shutdown
@@ -260,7 +262,7 @@ The following technical controls are implemented in code:
 | **Storage limitation** | Biometric data is never written to disk. RAM retention is bounded by configurable short TTLs with fallback eviction. |
 | **Explicit zeroing** | `clear(faceMap)` is called on the `[]byte` FaceMap immediately after use (deferred in `SubmitIDScan`), and again by `Manager.Close()` on every in-memory entry at shutdown. |
 | **No body logging** | Gin middleware never logs request or response bodies. The panic-recovery handler is bound to `nil` to prevent biometric data appearing in crash dumps. |
-| **Structured logs scrubbed** | Log fields are explicitly enumerated: method, path, status, latency, IP, user-agent. Biometric scores are absent from Info-level logs. |
+| **Structured logs scrubbed** | Log fields are explicitly enumerated: method, path, status, latency, IP, user-agent. Biometric scores are absent from Info-level logs, except the chip face-match level in the `credential_issued` audit event (§2.1), which records the evidence for the chip photo gate. |
 | **Sensitive debug opt-in** | Document identity fields are excluded by default even at Debug level. `logging.include_pii` enables the development-only exception with a startup warning; portraits and raw biometric data remain excluded (§2.4). |
 | **One-time-use sessions** | Liveness entries and credential offers are deleted on first access (`TakeLiveness`, `TakeOffer`). An attacker cannot replay a session ID. |
 | **Rate limiting** | Biometric endpoints are rate-limited per source IP to slow automated bulk enumeration or scraping. |

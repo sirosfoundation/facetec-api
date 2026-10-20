@@ -125,18 +125,26 @@ func bindPortraitToChip(id *facetec.IDScanResult, verifiedDGs []int) {
 // config.Validate refuses anything outside 0–10.
 const defaultMinChipFaceMatchLevel = 6
 
+// maxChipFaceMatchLevel is the top of FaceTec's match level scale.
+const maxChipFaceMatchLevel = 10
+
 // chipFaceRejection refuses a scan whose face does not match the photo on the
 // document's chip (FaceTec's matchLevelNFCToFaceMap). The chip gates prove
 // the chip is genuine and the printed-photo match (matchLevel) proves the face
 // matches the data page; only this ties the chip, and so the identity in the
 // credential, to the person in front of the camera. Without it, a genuine
 // document with a substituted printed photo passes every other check. A scan
-// for which FaceTec reported no chip match is refused too (fail closed).
+// for which FaceTec reported no chip match, or a level outside FaceTec's 0–10
+// scale, is refused too (fail closed): a malformed score is not read as an
+// exceptionally good match.
 func chipFaceRejection(id facetec.IDScanResult, minLevel int) (code idverrors.Code, msg string, rejected bool) {
 	if minLevel < 1 {
 		minLevel = defaultMinChipFaceMatchLevel
 	}
 	if id.ChipFaceMatchLevel == nil {
+		return idverrors.CodeChipPhotoMismatch, "the face could not be compared with the photo on the document's chip", true
+	}
+	if level := *id.ChipFaceMatchLevel; level < 0 || level > maxChipFaceMatchLevel {
 		return idverrors.CodeChipPhotoMismatch, "the face could not be compared with the photo on the document's chip", true
 	}
 	if *id.ChipFaceMatchLevel < minLevel {

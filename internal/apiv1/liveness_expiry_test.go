@@ -164,7 +164,6 @@ func TestProcessRequest_ExpiryGateAfterChipGate(t *testing.T) {
 	payload := `{
 	"idScanResultsSoFar": {
 		"photoIDNextStepEnumInt": 4, "matchLevel": 7, "matchLevelNFCToFaceMap": 7,
-		"matchLevelNFCToFaceMap": 7,
 		"nfcStatusEnumInt": 2, "nfcAuthenticationStatusEnumInt": 0,
 		"mrzStatusEnumInt": 2, "barcodeStatusEnumInt": 3,
 		"documentData": {"documentType": "passport", "dateOfExpiry": "2020-01-31"}

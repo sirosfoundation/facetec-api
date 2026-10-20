@@ -30,6 +30,9 @@ func TestChipFaceRejection(t *testing.T) {
 		{"no minimum configured uses the default (6)", intPtr(5), 0, true},
 		{"no minimum configured, at the default", intPtr(6), 0, false},
 		{"stricter configured minimum", intPtr(7), 8, true},
+		{"top of the scale", intPtr(10), 6, false},
+		{"above the 0–10 scale", intPtr(11), 6, true},
+		{"negative", intPtr(-1), 0, true},
 	}
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
