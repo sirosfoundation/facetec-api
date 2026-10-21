@@ -199,6 +199,15 @@ func (c *Client) SubmitIDScan(ctx context.Context, livenessSessionID string, idS
 		return "", "", rej
 	}
 
+	if code, msg, rejected := chipFaceRejection(*idScanResult, c.cfg.FaceTec.MinChipFaceMatchLevel); rejected {
+		c.log.Info("id-scan scan rejected: chip photo match",
+			zap.String("tenant", tc.ID),
+			zap.String("doc_type", idScanResult.DocumentData.DocumentType),
+			zap.Bool("chip_face_match_reported", idScanResult.ChipFaceMatchLevel != nil),
+		)
+		return "", "", idverrors.New(code, msg)
+	}
+
 	if code, msg, rejected := documentExpiryRejection(idScanResult.DocumentData, time.Now()); rejected {
 		c.log.Info("id-scan scan rejected: document expiry",
 			zap.String("tenant", tc.ID),
@@ -323,6 +332,19 @@ func (c *Client) ProcessRequest(ctx context.Context, req *facetec.ProcessRequest
 		)
 		resp.CredentialIssueError = rej.Message
 		resp.CredentialIssueErrCode = string(rej.Code)
+		return resp, nil
+	}
+
+	// Hard gate: the face must match the photo on the chip, not only the one
+	// printed on the document (see chipFaceRejection).
+	if code, msg, rejected := chipFaceRejection(scanResult.IDScan, c.cfg.FaceTec.MinChipFaceMatchLevel); rejected {
+		c.log.Info("process-request scan rejected: chip photo match",
+			zap.String("tenant", tc.ID),
+			zap.String("doc_type", scanResult.IDScan.DocumentData.DocumentType),
+			zap.Bool("chip_face_match_reported", scanResult.IDScan.ChipFaceMatchLevel != nil),
+		)
+		resp.CredentialIssueError = msg
+		resp.CredentialIssueErrCode = string(code)
 		return resp, nil
 	}
 

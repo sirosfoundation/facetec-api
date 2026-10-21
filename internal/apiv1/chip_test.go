@@ -66,6 +66,7 @@ func chipPayload(t *testing.T, chip *emrtdtest.Chip, authStatus int, withChip bo
 	body, err := json.Marshal(map[string]any{"idScanResultsSoFar": map[string]any{
 		"photoIDNextStepEnumInt":         4,
 		"matchLevel":                     8,
+		"matchLevelNFCToFaceMap":         8,
 		"nfcStatusEnumInt":               4,
 		"nfcAuthenticationStatusEnumInt": authStatus,
 		"mrzStatusEnumInt":               2,
@@ -175,7 +176,7 @@ func TestAssessChip_FillsScanResult(t *testing.T) {
 	fields := chipAuditFields(scan.IDScan)
 	enc := zap.NewExample()
 	enc.Info("x", fields...) // must not panic
-	assert.Len(t, fields, 6)
+	assert.Len(t, fields, 7)
 }
 
 // An OCR'd field that differs from the chip no longer makes the chip

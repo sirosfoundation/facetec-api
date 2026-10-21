@@ -63,6 +63,7 @@ by environment variables. The full annotated reference is [configs/config.yaml](
 | `facetec.device_key` | `FACETEC_DEVICE_KEY` | *(optional)* | FaceTec device key; sent as `X-Device-Key`. Only required by the FaceTec Testing API — omit when using your own FaceTec Server (v10+) |
 | `facetec.device_key_path` | `FACETEC_DEVICE_KEY_PATH` | *(optional)* | File containing the FaceTec device key (takes precedence over `device_key`) |
 | `facetec.timeout` | `FACETEC_TIMEOUT` | `30s` | HTTP timeout for FaceTec Server requests |
+| `facetec.min_chip_face_match_level` | `FACETEC_MIN_CHIP_FACE_MATCH_LEVEL` | `6` | Lowest match (1–10) between the live face and the photo on the document's chip that may be issued; a hard gate, independent of the SPOCP rules. `0` selects the default, so the gate cannot be switched off |
 | `facetec.tls.skip_verify` | `FACETEC_TLS_SKIP_VERIFY` | `false` | Disable cert verification — **never use in production** |
 | `facetec.tls.ca_file` | `FACETEC_TLS_CA_FILE` | *(optional)* | CA certificate for outbound FaceTec TLS |
 | `facetec.tls.cert_file` | `FACETEC_TLS_CERT_FILE` | *(optional)* | Client certificate for FaceTec mTLS |
@@ -314,6 +315,14 @@ rules with `liveness-score` 100.
 **Document expiry.** An expired document (`document_expired`), or one whose expiry date is missing
 or unreadable (`document_unreadable`), is refused. A document is valid through its expiry date,
 compared in UTC. The legacy `/v1/id-scan` endpoint applies the same check.
+
+**Chip photo.** FaceTec reports two face matches: `matchLevel` against the photo printed on the
+document (the rules' `face-match-level`), and `matchLevelNFCToFaceMap` against the photo on the
+chip. Only the second ties the chip, and so the identity in the credential, to the person in front
+of the camera; without it, a genuine document with a substituted printed photo passes every other
+check. A scan whose chip match is below `facetec.min_chip_face_match_level` (default 6), or for
+which FaceTec reported none, is refused with `chip_photo_mismatch`, on both `/process-request` and
+`/v1/id-scan`. The level is recorded as `chip_face_match_level` in the issuance audit log.
 
 **Chip.** A scan without an authenticated chip is refused:
 

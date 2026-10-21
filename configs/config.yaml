@@ -35,6 +35,10 @@ facetec:
   # HTTP timeout for FaceTec Server requests.
   timeout: "30s"
 
+  # Lowest match (1-10) between the live face and the photo on the document's
+  # chip (FaceTec's matchLevelNFCToFaceMap) that may be issued.
+  min_chip_face_match_level: 6
+
   # TLS configuration for the outbound HTTPS connection to the FaceTec Server.
   tls:
     # skip_verify: false    # Disable cert verification — NEVER use in production.

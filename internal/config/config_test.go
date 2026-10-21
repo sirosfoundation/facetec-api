@@ -24,6 +24,9 @@ func TestLoad_Defaults(t *testing.T) {
 	if cfg.FaceTec.Timeout != 30*time.Second {
 		t.Errorf("FaceTec.Timeout: got %v, want 30s", cfg.FaceTec.Timeout)
 	}
+	if cfg.FaceTec.MinChipFaceMatchLevel != 6 {
+		t.Errorf("FaceTec.MinChipFaceMatchLevel: got %d, want 6", cfg.FaceTec.MinChipFaceMatchLevel)
+	}
 	if cfg.Issuer.Format != "sdjwt" {
 		t.Errorf("Issuer.Format: got %q, want sdjwt", cfg.Issuer.Format)
 	}
@@ -456,5 +459,21 @@ func TestValidate_TrustPDPURLAtMostOneTrailingSlash(t *testing.T) {
 	cfg.Trust.PDPURL = "https://pdp.example///"
 	if err := cfg.Validate(); err == nil {
 		t.Error("multiple trailing slashes must be rejected")
+	}
+}
+
+func TestValidate_MinChipFaceMatchLevel(t *testing.T) {
+	for _, tc := range []struct {
+		level int
+		ok    bool
+	}{{0, true}, {1, true}, {6, true}, {10, true}, {-1, false}, {11, false}} {
+		cfg := &config.Config{
+			FaceTec: config.FaceTecConfig{ServerURL: "https://x", MinChipFaceMatchLevel: tc.level},
+			Issuer:  config.IssuerConfig{Addr: "x", Scope: "s"},
+			JWT:     config.JWTConfig{Secret: "shared-secret"},
+		}
+		if err := cfg.Validate(); (err == nil) != tc.ok {
+			t.Errorf("min_chip_face_match_level %d: Validate() = %v, want ok=%v", tc.level, err, tc.ok)
+		}
 	}
 }

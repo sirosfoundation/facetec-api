@@ -1,6 +1,7 @@
 package facetec
 
 import (
+	"fmt"
 	"testing"
 )
 
@@ -531,6 +532,57 @@ func TestLivenessProven(t *testing.T) {
 			proven, ok := LivenessProven(tc.payload)
 			if proven != tc.wantProven || ok != tc.wantVerdict {
 				t.Errorf("LivenessProven() = (%v, %v), want (%v, %v)", proven, ok, tc.wantProven, tc.wantVerdict)
+			}
+		})
+	}
+}
+
+// TestExtractScanResult_ChipFaceMatchLevel reads matchLevelNFCToFaceMap, the
+// match between the live FaceMap and the chip's photo. A live FaceTec Server
+// 10.1.4 response reported 7 after an authenticated chip read.
+func TestExtractScanResult_ChipFaceMatchLevel(t *testing.T) {
+	t.Run("reported", func(t *testing.T) {
+		p := realPayload()
+		p["idScanResultsSoFar"].(map[string]any)["matchLevelNFCToFaceMap"] = float64(7)
+		result, ok, err := ExtractScanResult(p)
+		if err != nil || !ok {
+			t.Fatalf("err=%v ok=%v", err, ok)
+		}
+		if result.IDScan.ChipFaceMatchLevel == nil || *result.IDScan.ChipFaceMatchLevel != 7 {
+			t.Errorf("ChipFaceMatchLevel = %v, want 7", result.IDScan.ChipFaceMatchLevel)
+		}
+	})
+
+	t.Run("reported as 0 is kept apart from absent", func(t *testing.T) {
+		p := realPayload()
+		p["idScanResultsSoFar"].(map[string]any)["matchLevelNFCToFaceMap"] = float64(0)
+		result, _, err := ExtractScanResult(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result.IDScan.ChipFaceMatchLevel == nil || *result.IDScan.ChipFaceMatchLevel != 0 {
+			t.Errorf("ChipFaceMatchLevel = %v, want 0", result.IDScan.ChipFaceMatchLevel)
+		}
+	})
+
+	t.Run("absent", func(t *testing.T) {
+		p := realPayload()
+		delete(p["idScanResultsSoFar"].(map[string]any), "matchLevelNFCToFaceMap")
+		result, _, err := ExtractScanResult(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result.IDScan.ChipFaceMatchLevel != nil {
+			t.Errorf("ChipFaceMatchLevel = %v, want nil", *result.IDScan.ChipFaceMatchLevel)
+		}
+	})
+
+	for _, v := range []any{"seven", "7", 7.5, true} {
+		t.Run(fmt.Sprintf("wrong type %T %v fails closed", v, v), func(t *testing.T) {
+			p := realPayload()
+			p["idScanResultsSoFar"].(map[string]any)["matchLevelNFCToFaceMap"] = v
+			if _, _, err := ExtractScanResult(p); err == nil {
+				t.Errorf("want an error for matchLevelNFCToFaceMap %#v", v)
 			}
 		})
 	}
