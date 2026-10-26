@@ -310,7 +310,7 @@ func (c *Config) Validate() error {
 		}
 		// ParseBaseURL strips path, query and fragment, but the client appends
 		// /evaluation to the configured string as-is: accept only a bare origin.
-		u, _ := url.Parse(origin)
+		// u, _ := url.Parse(origin)
 		// if u.Scheme != "https" && !isLoopbackHost(u.Hostname()) {
 		// 	return fmt.Errorf("config: trust.pdp_url must use https (plain http is only allowed for localhost development)")
 		// }
