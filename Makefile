@@ -1,5 +1,5 @@
 .PHONY: all build test test-unit test-integration lint fmt vet clean \
-        docker docker-push run dev proto help setup
+        docker docker-push run dev help setup
 
 # ── Build variables ──────────────────────────────────────────────────────────
 BINARY      := facetec-api
@@ -84,9 +84,6 @@ vet: ## Run go vet
 	@go vet ./...
 
 # ── Proto ─────────────────────────────────────────────────────────────────────
-proto: ## Regenerate internal/gen/ from vc proto files
-	@./scripts/generate-proto.sh
-
 # ── Docker ────────────────────────────────────────────────────────────────────
 docker: ## Build Docker image
 	@echo "Building Docker image $(DOCKER_IMAGE):$(DOCKER_TAG)..."
@@ -119,8 +116,6 @@ tools: ## Install required development tools
 	@echo "Installing development tools..."
 	@go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
 	@go install github.com/air-verse/air@latest
-	@go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
-	@go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
 	@echo "Done."
 
 setup: ## Set up development environment (install hooks)
