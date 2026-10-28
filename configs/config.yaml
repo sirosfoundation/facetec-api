@@ -116,7 +116,16 @@ security:
 # Omitting tenant_id (or using an unconfigured value) falls back to the global
 # policy and issuer settings — suitable for most single-tenant deployments.
 jwt:
+  # Preferred: verify ES256/ES384/EdDSA tokens against the issuer's published
+  # public keys. Must be https (plain http only for localhost). With this set
+  # and no secret below, this service holds nothing that can mint a token.
+  # jwks_uri: "https://backend.siros.org/.well-known/jwks.json"
+  # jwks_cache_ttl: "15m"
+  # jwks_timeout: "5s"
+
   # HMAC secret for HS256/HS384/HS512. Use secret_path in production.
+  # Both this and jwks_uri may be set during the migration (#12): a token is
+  # verified by whichever matches its algorithm family, never across families.
   # secret: ""
   # secret_path: "/run/secrets/jwt_secret"
 

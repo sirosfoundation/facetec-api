@@ -211,6 +211,80 @@ func TestValidate_IncludePIIRequiresDebugLevel(t *testing.T) {
 	}
 }
 
+func TestValidate_JWKSURI(t *testing.T) {
+	// A secret is configured throughout so the separate auth requirement is
+	// always satisfied and only the URI is under test.
+	cfg := func(uri string) *config.Config {
+		return &config.Config{
+			FaceTec: config.FaceTecConfig{ServerURL: "https://x"},
+			Issuer:  config.IssuerConfig{Addr: "https://x", Scope: "s"},
+			JWT:     config.JWTConfig{JWKSURI: uri, Secret: "shared-secret"},
+		}
+	}
+
+	for _, uri := range []string{
+		"",
+		"https://backend.example.org/.well-known/jwks.json",
+		"http://localhost:8080/.well-known/jwks.json",
+		"http://127.0.0.1:8080/.well-known/jwks.json",
+		"http://[::1]:8080/.well-known/jwks.json",
+	} {
+		t.Run("accepts/"+uri, func(t *testing.T) {
+			if err := cfg(uri).Validate(); err != nil {
+				t.Errorf("jwt.jwks_uri %q: unexpected error: %v", uri, err)
+			}
+		})
+	}
+
+	// The key set decides which tokens are accepted, so fetching it over
+	// plaintext would let anyone on the path mint tokens -- worse than the
+	// shared secret this replaces.
+	for _, uri := range []string{
+		"http://backend.example.org/.well-known/jwks.json",
+		"ftp://backend.example.org/jwks.json",
+		"/.well-known/jwks.json",
+		"backend.example.org/jwks.json",
+	} {
+		t.Run("rejects/"+uri, func(t *testing.T) {
+			if err := cfg(uri).Validate(); err == nil {
+				t.Errorf("jwt.jwks_uri %q: expected an error", uri)
+			}
+		})
+	}
+}
+
+// TestValidate_JWKSURISatisfiesAuthRequirement pins that jwks_uri alone is a
+// complete auth configuration -- the point of the migration is a deployment
+// that holds no token-minting secret at all.
+func TestValidate_JWKSURISatisfiesAuthRequirement(t *testing.T) {
+	single := &config.Config{
+		FaceTec: config.FaceTecConfig{ServerURL: "https://x"},
+		Issuer:  config.IssuerConfig{Addr: "https://x", Scope: "s"},
+		JWT:     config.JWTConfig{JWKSURI: "https://backend.example.org/jwks.json"},
+	}
+	if err := single.Validate(); err != nil {
+		t.Errorf("jwks_uri alone should satisfy the auth requirement: %v", err)
+	}
+
+	multi := &config.Config{
+		FaceTec: config.FaceTecConfig{ServerURL: "https://x"},
+		Issuer:  config.IssuerConfig{Addr: "https://x", Scope: "s"},
+		JWT:     config.JWTConfig{JWKSURI: "https://backend.example.org/jwks.json"},
+		Tenants: []config.TenantConfig{{ID: "t-1"}},
+	}
+	if err := multi.Validate(); err != nil {
+		t.Errorf("jwks_uri alone should satisfy multi-tenant mode: %v", err)
+	}
+
+	none := &config.Config{
+		FaceTec: config.FaceTecConfig{ServerURL: "https://x"},
+		Issuer:  config.IssuerConfig{Addr: "https://x", Scope: "s"},
+	}
+	if err := none.Validate(); err == nil {
+		t.Error("expected an error with no jwks_uri, secret or app key")
+	}
+}
+
 func TestValidate_WithoutDeviceKey(t *testing.T) {
 	cfg := &config.Config{
 		FaceTec: config.FaceTecConfig{ServerURL: "https://x"},
