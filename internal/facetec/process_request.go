@@ -461,7 +461,7 @@ func normalizeFaceTecDate(s string, birth bool) string {
 
 	// Return as-is if we can't parse it; downstream will see the raw value.
 	// MapPhotoIDClaims then leaves the claim out entirely, so the caller logs
-	// a warning naming the field — see apiv1.logUnparseableDates.
+	// a warning naming the field — see apiv1.logMissingPhotoIDClaims.
 	return s
 }
 
