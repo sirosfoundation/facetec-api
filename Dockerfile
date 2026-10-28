@@ -14,7 +14,12 @@ RUN go mod download
 
 # Copy source and build.
 COPY . .
+# -tags production makes this a production build: config.Validate then refuses
+# trust.required: false, which would disable document-signer trust and let OCR
+# claims into issued credentials (#85). Build without the tag for a development
+# stack that has no go-trust PDP.
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+    -tags production \
     -ldflags="-s -w -X main.Version=${VERSION} -X main.Commit=${COMMIT}" \
     -o facetec-api ./cmd/server
 

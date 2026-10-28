@@ -42,6 +42,12 @@ jobs:
             ./internal/tenant/... \
             ./tests/...
 
+      # The production build tag changes what config.Validate accepts (#85), so
+      # the suite has to run both ways or one side of every build-mode test is
+      # never executed. Coverage comes from the development run above.
+      - name: Run tests with the production build tag
+        run: GOWORK=off go test -tags production ./...
+
       - name: Show coverage summary
         run: go tool cover -func=coverage.out | tail -5
 

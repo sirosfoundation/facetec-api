@@ -1,5 +1,5 @@
 .PHONY: all build test test-unit test-integration lint fmt vet clean \
-        docker docker-push run dev proto help setup
+        docker docker-push run dev proto help setup build-production
 
 # ── Build variables ──────────────────────────────────────────────────────────
 BINARY      := facetec-api
@@ -37,10 +37,15 @@ TESTPKGS := \
 
 all: lint test build ## Run lint, test, build (default)
 
-build: ## Build the server binary
+build: ## Build the server binary (development; permits trust.required: false)
 	@echo "Building $(BINARY) $(VERSION)..."
 	@mkdir -p bin
 	@go build $(LDFLAGS) -o bin/$(BINARY) ./cmd/server
+
+build-production: ## Build with -tags production (refuses trust.required: false)
+	@echo "Building $(BINARY) $(VERSION) [production]..."
+	@mkdir -p bin
+	@go build -tags production $(LDFLAGS) -o bin/$(BINARY) ./cmd/server
 
 build-linux: ## Cross-compile for Linux amd64
 	@echo "Building $(BINARY) for linux/amd64..."
