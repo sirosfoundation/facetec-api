@@ -30,7 +30,7 @@ jobs:
           GOWORK=off go test \
             -covermode=atomic \
             -coverprofile=coverage.out \
-            ./internal/...
+            ./...
 
       - name: SonarCloud Scan
         uses: SonarSource/sonarqube-scan-action@v8

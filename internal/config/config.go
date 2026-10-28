@@ -11,6 +11,8 @@ import (
 	"github.com/kelseyhightower/envconfig"
 	"github.com/sirosfoundation/go-trust/pkg/authzenclient"
 	"gopkg.in/yaml.v3"
+
+	"github.com/sirosfoundation/facetec-api/internal/buildmode"
 )
 
 // Config is the top-level configuration for facetec-api.
@@ -317,6 +319,17 @@ func (c *Config) Validate() error {
 		if strings.TrimSuffix(c.Trust.PDPURL, "/") != origin {
 			return fmt.Errorf("config: trust.pdp_url must be a bare origin such as %s (no path, query or fragment)", origin)
 		}
+	}
+	// trust.required: false switches off both the document-signer trust check
+	// and the verified-identity gate that depends on it (#85), which together
+	// are what keep OCR of a printed page out of an issued credential. That is
+	// a reasonable thing to do on a development stack with no PDP, and not a
+	// thing a deployment issuing real credentials may do -- so a production
+	// build refuses it outright rather than warning about it.
+	if !c.Trust.Required && buildmode.Production() {
+		return fmt.Errorf("config: trust.required: false is refused by a production build; " +
+			"it disables document-signer trust and allows OCR claims into credentials. " +
+			"Use a development build for a stack without a go-trust PDP")
 	}
 	if c.Trust.Timeout < 0 {
 		return fmt.Errorf("config: trust.timeout must not be negative")

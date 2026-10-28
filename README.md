@@ -84,7 +84,7 @@ by environment variables. The full annotated reference is [configs/config.yaml](
 | `policy.rules_dir` | `POLICY_RULES_DIR` | *(empty)* | Directory of `.spoc` rule files |
 | `trust.pdp_url` | `TRUST_PDP_URL` | *(empty)* | Base origin of the go-trust AuthZEN PDP (must be `https`, no path; plain `http` only for localhost) that decides whether an eMRTD document signer chains to a reviewed CSCA (`POST {url}/evaluation`). Empty = unconfigured: chips are verified locally but never reported as trusted |
 | `trust.timeout` | `TRUST_TIMEOUT` | `5s` | Timeout of each PDP request attempt (one retry, transport errors only) |
-| `trust.required` | `TRUST_REQUIRED` | `true` | Fail closed: refuse to start without `trust.pdp_url`, and hard-reject any passport scan that presented chip data which is not trusted, independent of the SPOCP rules. Set `false` only for development or when no rule depends on `chip-trusted` |
+| `trust.required` | `TRUST_REQUIRED` | `true` | Fail closed: refuse to start without `trust.pdp_url`, hard-reject **any** document whose chip data is not trusted, and refuse to issue a credential whose identity did not come from a verified, trusted chip (`chip_data_unverified`), independent of the SPOCP rules. **A production build (`-tags production`, which the Dockerfile uses) refuses `false` outright**; a development build accepts it with a startup warning |
 | `session.liveness_ttl` | `SESSION_LIVENESS_TTL` | `2m` | How long a FaceMap is held in memory |
 | `session.offer_ttl` | `SESSION_OFFER_TTL` | `5m` | How long a credential offer is held in memory |
 | `session.liveness_proof_ttl` | `SESSION_LIVENESS_PROOF_TTL` | `15m` | How long FaceTec Server's liveness verdict for a `/process-request` session is held, from its liveness step to its final photo ID match result |
@@ -359,8 +359,37 @@ only when facetec-api itself verified the SOD signature and every data-group has
 document code matches the reported document type, **and** the go-trust PDP trusts the DSC for the issuing state
 (see [ADR-002](docs/adr/002-emrtd-document-signer-trust.md)). Passports need both. Passports whose
 chips lack Active/Chip Authentication (status 1) are therefore refused by design; this is a known
-coverage trade-off. With `trust.required` (passports only), a scan that passes the NFC gate (status 4) but whose raw
-chip data is missing or untrusted is refused with `chip_untrusted`.
+coverage trade-off. With `trust.required`, a scan of **any** document type that passes the NFC gate (status 4) but
+whose raw chip data is missing or untrusted is refused with `chip_untrusted`. This was scoped to passports until
+[#85](https://github.com/sirosfoundation/facetec-api/issues/85): ID cards are ICAO 9303 documents too, signed under
+the same CSCAs, so exempting them meant issuing an ID card credential from a signer nobody vouched for. The cost is
+that an ISO 18013 driving licence is refused until its chips and trust lists are supported.
+
+**Only verified chip data is issued.** A second hard gate, at the point of issuance, refuses a credential whose
+identity claims would have come from OCR of the printed page: the identity must have come from the document's chip
+**and** that chip's signer must be trusted. The code is `chip_data_unverified`, distinct from `chip_untrusted`:
+`chip_untrusted` says the signer is not trusted, `chip_data_unverified` says there was no verified chip identity to
+issue from at all — a chip format this service does not parse, or a chip whose DG1 could not be read. OCR of a data
+page is trivial to forge, and a signature over forged data is worthless without a trusted signer, which is why both
+halves are required.
+
+The gate is deliberately separate from the trust check rather than a clause inside it, so that a later change to the
+trust logic cannot silently reopen the path from OCR to a credential.
+
+### Production builds
+
+`trust.required: false` switches off the trust check and this gate together. That is reasonable on a development
+stack with no PDP and unacceptable in a deployment issuing real credentials, so it is a **build-time** decision
+rather than a runtime one:
+
+```bash
+go build -tags production ./cmd/server   # refuses trust.required: false at startup
+go build ./cmd/server                    # accepts it, with a startup warning
+```
+
+The Dockerfile and `make build-production` set the tag, so every container image is a production build. A build tag
+is decided once by whoever builds the image and cannot be overridden by the deployment it is handed to — unlike a
+config key, which is how the removed `logging.production` flag drifted into meaning three unrelated things.
 
 **Identity from the chip.** Once the SOD signature and the data-group hashes are verified, the
 credential's identity fields come from the chip, not from FaceTec's OCR of the MRZ in the photo:
