@@ -10,14 +10,14 @@
 A Go microservice that bridges the [FaceTec](https://www.facetec.com/) biometric SDK (running
 on a mobile device) with a verifiable-credential (VC) issuer. It acts as a security gateway:
 biometric liveness and photo-ID scan results are validated against configurable SPOCP policy,
-and — only on acceptance — a verifiable credential is issued through a gRPC back-end.
+and — only on acceptance — a verifiable credential is issued through the vc apigw's REST API.
 
 ```
 Mobile SDK  →  facetec-api  →  FaceTec Server  (liveness + ID scan)
                    │
                    ├── SPOCP policy engine  (accept / reject)
                    │
-                   └──  vc issuer (gRPC)  →  SD-JWT / mDoc / VC 2.0
+                   └──  vc apigw (REST)  →  SD-JWT / mDoc / VC 2.0
 ```
 
 Biometric data (FaceMaps, raw scan images) **never leaves process memory** and is never written
@@ -68,12 +68,16 @@ by environment variables. The full annotated reference is [configs/config.yaml](
 | `facetec.tls.ca_file` | `FACETEC_TLS_CA_FILE` | *(optional)* | CA certificate for outbound FaceTec TLS |
 | `facetec.tls.cert_file` | `FACETEC_TLS_CERT_FILE` | *(optional)* | Client certificate for FaceTec mTLS |
 | `facetec.tls.key_file` | `FACETEC_TLS_KEY_FILE` | *(optional)* | Client private key for FaceTec mTLS |
-| `issuer.addr` | `ISSUER_ADDR` | *(required)* | gRPC address of the vc issuer (e.g. `issuer:8090`) |
-| `issuer.tls` | `ISSUER_TLS` | `false` | Enable TLS on the gRPC issuer connection |
-| `issuer.ca_file` | `ISSUER_CA_FILE` | *(optional)* | CA certificate for the issuer gRPC connection |
-| `issuer.cert_file` | `ISSUER_CERT_FILE` | *(optional)* | Client certificate for issuer mTLS |
-| `issuer.key_file` | `ISSUER_KEY_FILE` | *(optional)* | Client private key for issuer mTLS |
+| `issuer.addr` | `ISSUER_ADDR` | *(required)* | Base URL of the vc apigw, scheme included (e.g. `https://issuer.example.org`) |
+| `issuer.tls` | `ISSUER_TLS` | `false` | Verify the apigw's TLS certificate against `ca_file`, and send a client certificate when one is configured. Has no effect on a plain `http://` base URL |
+| `issuer.ca_file` | `ISSUER_CA_FILE` | *(optional)* | CA certificate for the apigw's TLS certificate |
+| `issuer.cert_file` | `ISSUER_CERT_FILE` | *(optional)* | Client certificate for apigw mTLS |
+| `issuer.key_file` | `ISSUER_KEY_FILE` | *(optional)* | Client private key for apigw mTLS |
+| `issuer.api_key` | `ISSUER_API_KEY` | *(optional)* | Bearer token sent to the apigw on each request |
+| `issuer.api_key_path` | `ISSUER_API_KEY_PATH` | *(optional)* | File containing the apigw Bearer token (takes precedence over `api_key`) |
 | `issuer.scope` | `ISSUER_SCOPE` | *(required)* | Default credential scope URI |
+| `issuer.authentic_source` | `ISSUER_AUTHENTIC_SOURCE` | `facetec-api` | Source system identifier sent to the apigw |
+| `issuer.vct` | `ISSUER_VCT` | *(optional)* | Verifiable Credential Type sent with the upload |
 | `issuer.format` | `ISSUER_FORMAT` | `sdjwt` | Default credential format: `sdjwt`, `mdoc`, `vc20`. `mdoc` uploads an [EWC RFC013](https://github.com/EWC-consortium/eudi-wallet-rfcs/blob/main/ewc-rfc013-issue-photoid.md) Photo ID, see below |
 | `issuer.issuing_authority` | `ISSUER_ISSUING_AUTHORITY` | `issuer.authentic_source` | Photo ID `issuing_authority_unicode` (`mdoc` only) |
 | `issuer.issuing_country` | `ISSUER_ISSUING_COUNTRY` | scanned document's country | Photo ID `issuing_country`, ISO 3166-1 alpha-2 (`mdoc` only) |
@@ -475,20 +479,17 @@ make fmt            # gofmt
 make vet            # go vet
 ```
 
-### Regenerating gRPC client code
+### The vc apigw contract
 
-The gRPC stubs under `internal/gen/issuer/apiv1_issuer/` are copied from the `vc` workspace
-sibling. Regenerate them after updating the `vc` proto source:
+`internal/issuerclient` is a plain `net/http` client; there are no generated
+stubs to regenerate. Issuance is two POSTs against `issuer.addr`:
 
-```bash
-./scripts/generate-proto.sh
-```
+| Call | Endpoint | Purpose |
+|---|---|---|
+| `Upload` | `POST {issuer.addr}/api/v1/datastore` | Store the policy-approved document data |
+| `PreauthOffer` | `POST {issuer.addr}/api/v1/datastore/preauth_offer` | Get the OID4VCI `credentialOfferURI` for the wallet |
 
-If `protoc` is available and you want to regenerate from the proto source directly:
-
-```bash
-REGEN=1 ./scripts/generate-proto.sh
-```
+Both carry `issuer.api_key` as a Bearer token when one is configured.
 
 ## Docker
 

@@ -46,16 +46,26 @@ facetec:
     # cert_file:   "/etc/facetec-api/client.crt"       # Client certificate for mTLS.
     # key_file:    "/etc/facetec-api/client.key"        # Client private key for mTLS.
 
-# ── vc Credential Issuer (gRPC) ───────────────────────────────────────────────
+# ── vc Credential Issuer (apigw REST API) ─────────────────────────────────────
 issuer:
-  # gRPC address of the vc issuer service (required).
-  addr: "localhost:8090"
+  # Base URL of the vc apigw, scheme included (required). facetec-api POSTs to
+  # {addr}/api/v1/datastore and {addr}/api/v1/datastore/preauth_offer.
+  addr: "http://localhost:8080"
 
-  # Disable TLS for local development only.
+  # TLS verification for the outbound apigw connection. No effect on http://.
   tls: false
   # ca_file:   "/etc/facetec-api/issuer-ca.crt"
   # cert_file: "/etc/facetec-api/client.crt"
   # key_file:  "/etc/facetec-api/client.key"
+
+  # Bearer token for the apigw, when it requires one. Prefer api_key_path.
+  # api_key_path: "/run/secrets/issuer_api_key"
+
+  # Source system identifier sent with the upload (default: "facetec-api").
+  # authentic_source: "facetec-api"
+
+  # Verifiable Credential Type sent with the upload.
+  # vct: "https://credentials.example.org/photo-id"
 
   # Credential scope URI — must match a scope configured in the vc issuer.
   scope: "https://credentials.example.org/photo-id"
