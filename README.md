@@ -383,7 +383,6 @@ This release implements the traceability and quality controls required by
 | Package | Purpose |
 |---------|---------|
 | `internal/auditlog` | Persistent IPV session audit logging (file or webhook sink) |
-| `internal/metrics` | Prometheus metrics: liveness scores, face-match levels, document types, outcomes |
 | `internal/evidence` | Cryptographic evidence binding — HMAC-SHA256 commitment linking session outcome to nonce |
 | `internal/review` | Operator review queue with TTL, escalation webhook, and PII-safe evidence retrieval |
 | `internal/quality` | Image quality assessment (face alignment, lighting, resolution) with configurable thresholds |
@@ -401,14 +400,24 @@ Sinks:
 
 ### Prometheus Metrics
 
-Exposed at `/metrics` (Prometheus text format):
+Exposed at `/metrics` (Prometheus text format, unauthenticated):
 
 | Metric | Type | Description |
 |--------|------|-------------|
-| `facetec_liveness_score` | Histogram | Distribution of liveness confidence scores |
-| `facetec_face_match_level` | Histogram | Distribution of face match levels (0–10) |
-| `facetec_document_type_total` | Counter (by `type`) | Documents processed by type |
-| `facetec_ipv_outcome_total` | Counter (by `outcome`) | Accept / reject / escalate totals |
+| `sirosid_facetec_http_requests_total` | Counter (by `method`, `path`, `status`) | HTTP requests served |
+| `sirosid_facetec_http_request_duration_seconds` | Histogram (by `method`, `path`) | HTTP request latency |
+
+`path` is the matched route pattern, never the raw URL, so a document or transaction ID in a
+path never becomes a label value; requests matching no route are recorded as `unmatched`. The
+probe endpoints (`/livez`, `/readyz`, `/healthz`) and `/metrics` itself are not recorded. The
+endpoint also serves the standard Go runtime (`go_*`) and process (`process_*`) collectors.
+
+There are deliberately **no IPV-outcome metrics**. Liveness scores, face-match levels and chip
+face-match levels are derived biometric indicators that [PRIVACY.md](PRIVACY.md) §3 lists as
+data that never leaves this service, and `/metrics` is unauthenticated. Per-tenant session
+outcome counters are absent for a related reason: at low session volume, an outcome and
+document type scraped per tenant approach a per-session disclosure. Publishing any of this is a
+privacy decision before it is a wiring one, and needs a PRIVACY.md amendment and DPO review.
 
 ### Evidence Binding
 
@@ -426,8 +435,8 @@ automatically. The queue never retains biometric templates or session tokens.
 ### Quality Checks
 
 The `internal/quality` package evaluates face alignment, lighting uniformity, and image
-resolution before accepting a scan. Results are recorded in the audit log and exposed as
-metrics. Scans below configured thresholds are rejected or escalated.
+resolution before accepting a scan. Results are recorded in the audit log. Scans below
+configured thresholds are rejected or escalated.
 
 ## Security
 
