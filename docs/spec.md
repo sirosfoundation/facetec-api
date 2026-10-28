@@ -8,7 +8,7 @@ https://dev.facetec.com/photo-id-match-guide?section=photo-id-scan#getting-start
 
 The facetec SDK will be integrated into the native app frontend of go-wallet-backend based on wallet-frontend but the factec SDK will be isolated from the other parts of the wallet frontend and can for all intents and purposes be treated as a separate application.
 
-Privacy is the primary concern. No biometric data will ever be stored on disk and every measure should be taken to make the attack surface of biometric data as small as possible. Biometrics will only be kept for as long as is absolutely necessary to complete a full scan+document validation flow. The facetec webservice (this project) should be treated as a separate security zone and will communicate with the vc issuer via gRPC interfaces. 
+Privacy is the primary concern. No biometric data will ever be stored on disk and every measure should be taken to make the attack surface of biometric data as small as possible. Biometrics will only be kept for as long as is absolutely necessary to complete a full scan+document validation flow. The facetec webservice (this project) should be treated as a separate security zone and communicates with the vc issuer over the apigw REST API (originally specified as gRPC). 
 
 The preferred mobile integration is FaceTec's `SessionRequestProcessor` pattern. The native app
 submits `requestBlob` to facetec-api `/process-request`; facetec-api forwards it to FaceTec Server

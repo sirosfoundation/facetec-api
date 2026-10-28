@@ -106,7 +106,7 @@ func main() {
 		svc  service
 	}
 	// Shutdown order matters: stop accepting HTTP traffic first, then release
-	// business-logic resources (session manager + gRPC connection).
+	// business-logic resources (session manager + issuer HTTP client).
 	shutdownOrder := []namedService{
 		{"http", httpSvc},
 		{"apiv1", apiv1Client},
