@@ -44,6 +44,14 @@ const (
 	// (nfcAuthenticationStatusEnumInt != AUTHENTICATED), including a chip that
 	// was read but failed authentication.
 	CodeNFCNotAuthenticated Code = "nfc_not_authenticated"
+	// CodeChipDataUnverified indicates the credential's identity claims would
+	// have come from OCR of the printed page rather than from the document's
+	// cryptographically verified, trusted chip (#85). It is distinct from
+	// chip_untrusted: that one says the chip's signer is not trusted, while
+	// this one says no verified chip identity was available to issue from at
+	// all -- a chip format this service does not parse (an ISO 18013 driving
+	// licence), or a chip whose DG1 could not be read.
+	CodeChipDataUnverified Code = "chip_data_unverified"
 	// CodeChipPhotoMismatch indicates the face did not match the photo on the
 	// document's chip (FaceTec's matchLevelNFCToFaceMap), or could not be
 	// compared with it.

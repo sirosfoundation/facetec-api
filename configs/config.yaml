@@ -82,10 +82,15 @@ policy:
 trust:
   # pdp_url: "https://go-trust.example.org"
   timeout: "5s"
-  # required=true (the default) refuses to start without pdp_url and rejects any
-  # passport scan (or scan with no reported document type) whose chip is missing
-  # or untrusted outright; ID cards and driving licences are not covered by it. Development only: set false to run without a PDP
-  # (chip-trusted is then always false; the shipped passport rule will reject).
+  # required=true (the default) refuses to start without pdp_url, rejects any
+  # document whose chip is missing or untrusted, and refuses to issue a
+  # credential whose identity did not come from a verified, trusted chip
+  # (chip_data_unverified) -- see issue #85.
+  #
+  # Setting false switches both off, so OCR of the printed page could reach a
+  # credential. A production build (-tags production, which the Dockerfile
+  # uses) REFUSES to start with false; a development build accepts it and
+  # warns. This file is the development example, hence false.
   required: false
 
 # ── Session (in-memory only, never persisted) ─────────────────────────────────
