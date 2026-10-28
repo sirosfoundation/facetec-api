@@ -150,8 +150,6 @@ type RateLimitConfig struct {
 
 // SessionConfig controls in-memory session lifetimes.
 type SessionConfig struct {
-	// LivenessTTL is how long a FaceMap is retained between liveness and id-scan steps.
-	LivenessTTL time.Duration `yaml:"liveness_ttl" envconfig:"SESSION_LIVENESS_TTL"`
 	// OfferTTL is how long a credential offer is retained before redemption.
 	OfferTTL time.Duration `yaml:"offer_ttl"    envconfig:"SESSION_OFFER_TTL"`
 	// LivenessProofTTL is how long FaceTec Server's liveness verdict for a
@@ -413,7 +411,6 @@ func defaultConfig() *Config {
 			Format: "sdjwt",
 		},
 		Session: SessionConfig{
-			LivenessTTL:      2 * time.Minute,
 			OfferTTL:         5 * time.Minute,
 			LivenessProofTTL: 15 * time.Minute,
 		},

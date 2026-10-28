@@ -10,9 +10,11 @@
 //  4. VC apigw REST client — uploads document data and triggers credential
 //     offer generation once policy passes.
 //
-// All biometric data (FaceMap templates, raw scan images) is held exclusively
-// in an in-memory session store ([session.Manager]) and is never written to disk.
-// FaceMap bytes are explicitly zeroed with clear() after use and on shutdown.
+// Biometric data (FaceScans, FaceMap templates, raw scan images) never enters
+// this service: FaceTec 10's process-request exchange carries opaque blobs
+// between the SDK and the FaceTec Server, and only the OCR and chip fields of
+// the finished scan are read out of the response. Nothing biometric is stored
+// in [session.Manager] or written to disk.
 package apiv1
 
 import (
@@ -64,7 +66,7 @@ func New(_ context.Context, cfg *config.Config, registry *tenant.Registry, log *
 		ftHTTPClient,
 	)
 
-	ses := session.New(cfg.Session.LivenessTTL, cfg.Session.OfferTTL, cfg.Session.LivenessProofTTL)
+	ses := session.New(cfg.Session.OfferTTL, cfg.Session.LivenessProofTTL)
 
 	log.Info("connecting to vc issuer", zap.String("addr", cfg.Issuer.Addr))
 	issuer, err := issuerclient.New(issuerclient.Config{

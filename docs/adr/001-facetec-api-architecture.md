@@ -2,7 +2,12 @@
 
 ## Status
 
-Accepted
+Accepted. Amended 2026-10-28: the legacy split flow described under "Scan Flow" was removed
+(issue #82). `POST /process-request` is the only mobile-facing contract. The two consequences
+for this ADR's reasoning: facetec-api no longer receives or holds a FaceMap, since every
+biometric payload now stays inside the blobs it relays undecoded; and the in-memory FaceMap
+store that the privacy-by-design constraint below was written about no longer exists. The
+rest of the decision stands.
 
 ## Context
 
@@ -49,12 +54,9 @@ Mobile App (FaceTec SDK)
 
 ### Scan Flow
 
-facetec-api now supports two mobile-facing contracts:
+The mobile-facing contract is `POST /process-request` (or `POST /v1/process-request`).
 
-1. **Preferred FaceTec-native flow** — `POST /process-request` or `POST /v1/process-request`
-2. **Legacy split flow** — `POST /v1/session-token`, `POST /v1/liveness`, `POST /v1/id-scan`
-
-The preferred flow keeps the mobile app aligned with FaceTec's `SessionRequestProcessor` pattern.
+It keeps the mobile app aligned with FaceTec's `SessionRequestProcessor` pattern.
 facetec-api forwards the opaque `requestBlob` to FaceTec Server, preserves the upstream JSON
 response, and augments successful photo-ID matches with local credential-offer metadata.
 
@@ -81,9 +83,6 @@ response, and augments successful photo-ID matches with local credential-offer m
 
 6. **Offer Redemption** — `GET /offer/{transactionId}`: the wallet retrieves the credential.
   The session entry is atomically deleted on read.
-
-The legacy split flow remains available for clients that still use explicit session-token,
-liveness, and ID-scan steps.
 
 ### SPOCP Policy Format
 

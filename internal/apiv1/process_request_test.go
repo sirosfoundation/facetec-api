@@ -100,7 +100,7 @@ func nfcPayload(nfcStatus, nfcAuthStatus int) string {
 func newTestClientForProcessRequest(t *testing.T, facetecBody string) *Client {
 	t.Helper()
 	ft := facetecServerStub(t, facetecBody)
-	sessions := session.New(time.Minute, time.Minute, time.Minute)
+	sessions := session.New(time.Minute, time.Minute)
 	t.Cleanup(sessions.Close)
 	return &Client{
 		cfg:      &config.Config{},

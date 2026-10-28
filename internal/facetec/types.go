@@ -1,18 +1,14 @@
 // Package facetec contains types for the FaceTec Server REST API.
-// All types in this package must be treated as sensitive when they contain
-// FaceScan or FaceMap data. Neither field should ever be logged or persisted.
+// ProcessRequestRequest carries the SDK's opaque request blob, which may hold
+// raw biometric capture data; it must never be logged or persisted.
 package facetec
 
-// LivenessCheckResult is the response from the FaceTec Server after a liveness check.
-// FaceMap is a derived biometric template used for subsequent face matching.
-// It must not be persisted to disk and must be discarded immediately after use.
+// LivenessCheckResult is the liveness half of a scan result. On the
+// process-request path the FaceTec Server reports only a verdict, so the score
+// is the nominal 1.0 for a session whose liveness step passed.
 type LivenessCheckResult struct {
-	Success          bool    `json:"success"`
-	LivenessScore    float64 `json:"livenessScore"` // 0.0–1.0
-	SessionTokenUsed string  `json:"sessionTokenUsed"`
-	// FaceMap is the server-computed biometric template derived from the FaceScan.
-	// Treat as highly sensitive biometric data.
-	FaceMap string `json:"facemap"`
+	Success       bool    `json:"success"`
+	LivenessScore float64 `json:"livenessScore"` // 0.0–1.0
 }
 
 // IDScanResult is the response from the FaceTec Server after a photo ID scan.

@@ -81,7 +81,6 @@ by environment variables. The full annotated reference is [configs/config.yaml](
 | `trust.pdp_url` | `TRUST_PDP_URL` | *(empty)* | Base origin of the go-trust AuthZEN PDP (must be `https`, no path; plain `http` only for localhost) that decides whether an eMRTD document signer chains to a reviewed CSCA (`POST {url}/evaluation`). Empty = unconfigured: chips are verified locally but never reported as trusted |
 | `trust.timeout` | `TRUST_TIMEOUT` | `5s` | Timeout of each PDP request attempt (one retry, transport errors only) |
 | `trust.required` | `TRUST_REQUIRED` | `true` | Fail closed: refuse to start without `trust.pdp_url`, and hard-reject any passport scan that presented chip data which is not trusted, independent of the SPOCP rules. Set `false` only for development or when no rule depends on `chip-trusted` |
-| `session.liveness_ttl` | `SESSION_LIVENESS_TTL` | `2m` | How long a FaceMap is held in memory |
 | `session.offer_ttl` | `SESSION_OFFER_TTL` | `5m` | How long a credential offer is held in memory |
 | `session.liveness_proof_ttl` | `SESSION_LIVENESS_PROOF_TTL` | `15m` | How long FaceTec Server's liveness verdict for a `/process-request` session is held, from its liveness step to its final photo ID match result |
 | `logging.level` | `LOG_LEVEL` | `info` | Log level: `debug`, `info`, `warn`, `error` |
@@ -208,22 +207,13 @@ is configured. `/livez` and `/readyz` are always unauthenticated.
 | `GET`  | `/v1/health` | Returns `200 {"status":"ok"}` — useful as a credential smoke-test |
 | `POST` | `/process-request` | FaceTec-compatible requestBlob/responseBlob endpoint; augments successful matches with offer metadata |
 | `POST` | `/v1/process-request` | Versioned alias of `/process-request` |
-| `POST` | `/v1/session-token` | Obtain a short-lived FaceTec session token |
-| `POST` | `/v1/liveness` | Submit a liveness FaceScan; returns `livenessSessionId` |
-| `POST` | `/v1/id-scan` | Submit a photo ID scan; returns `transactionId` + `credentialOfferURI` |
 | `GET`  | `/v1/offer/:txid` | Redeem a one-time credential offer (wallet pull) |
 
 ### Biometric flow
 
-Two mobile-facing contracts are supported:
-
-1. FaceTec-native processor flow via `/process-request` or `/v1/process-request`
-2. Legacy split flow via `/v1/session-token`, `/v1/liveness`, and `/v1/id-scan`
-
-The FaceTec-native flow is the recommended integration for mobile SDKs that already use the sample
-`SessionRequestProcessor` pattern.
-
-### FaceTec-native flow
+The one mobile-facing contract is the FaceTec-native processor flow, via `/process-request` or
+`/v1/process-request`. It is the integration for mobile SDKs using FaceTec's sample
+`SessionRequestProcessor` pattern, which is how FaceTec 10 drives a whole session.
 
 ```
 1. POST /process-request
@@ -240,31 +230,12 @@ a successful photo-ID match and local policy accepts it, facetec-api augments th
 `transactionId` and `credentialOfferURI`. If policy or issuance fails, the response still contains
 the upstream `responseBlob` and instead adds `credentialIssueError`.
 
-### Legacy split flow
-
-```
-1. POST /v1/session-token
-   ← { "sessionToken": "…" }
-
-2. POST /v1/liveness
-   → { "sessionToken": "…", "faceScan": "<base64>", "auditTrail": […] }
-   ← { "livenessSessionId": "…" }
-
-3. POST /v1/id-scan
-   → { "sessionToken": "…", "livenessSessionId": "…", "idScan": "<base64>",
-       "idScanFrontImagesCompressedBase64": […], … }
-   ← { "transactionId": "…", "credentialOfferURI": "openid-credential-offer://…" }
-
-4. GET /v1/offer/:transactionId
-   ← { "credentials": ["<signed-token>"], "scope": "…" }
-```
-
-Steps 2 and 3 are independently rate-limited per source IP.
-
 For FaceTec sample-app style integrations, use `/process-request` and send the
 SDK-generated `requestBlob` unchanged. The service returns FaceTec's response JSON
 unchanged, and on successful photo-ID matches also attaches `transactionId` and
 `credentialOfferURI` so the wallet can redeem the issued credential.
+
+`/process-request` is rate-limited per source IP.
 
 ## SPOCP Policy Rules
 
@@ -314,15 +285,15 @@ rules with `liveness-score` 100.
 
 **Document expiry.** An expired document (`document_expired`), or one whose expiry date is missing
 or unreadable (`document_unreadable`), is refused. A document is valid through its expiry date,
-compared in UTC. The legacy `/v1/id-scan` endpoint applies the same check.
+compared in UTC.
 
 **Chip photo.** FaceTec reports two face matches: `matchLevel` against the photo printed on the
 document (the rules' `face-match-level`), and `matchLevelNFCToFaceMap` against the photo on the
 chip. Only the second ties the chip, and so the identity in the credential, to the person in front
 of the camera; without it, a genuine document with a substituted printed photo passes every other
 check. A scan whose chip match is below `facetec.min_chip_face_match_level` (default 6), or for
-which FaceTec reported none, is refused with `chip_photo_mismatch`, on both `/process-request` and
-`/v1/id-scan`. The level is recorded as `chip_face_match_level` in the issuance audit log.
+which FaceTec reported none, is refused with `chip_photo_mismatch`. The level is recorded as
+`chip_face_match_level` in the issuance audit log.
 
 **Chip.** A scan without an authenticated chip is refused:
 
@@ -431,9 +402,10 @@ metrics. Scans below configured thresholds are rejected or escalated.
 
 ## Security
 
-- **Biometric data never touches disk.** FaceMap templates are held exclusively in process
-  memory for the duration of the liveness→id-scan window (default 2 min); backing bytes are
-  zeroed with `clear()` immediately after use and again on graceful shutdown.
+- **Biometric data never touches disk, and no template is ever held.** FaceScans, AuditTrail
+  images and the FaceMap derived from them stay inside the opaque blobs exchanged between the
+  SDK and the FaceTec Server; facetec-api relays them without decoding them. The only
+  per-session state it keeps is a boolean liveness verdict.
 - **MRZ lines stripped before forwarding.** Raw MRZ lines (encoding the full identity in
   machine-readable form) are removed before any data is sent to the VC issuer.
 - **No request/response body logging.** Gin runs in `gin.New()` mode; the panic-recovery handler

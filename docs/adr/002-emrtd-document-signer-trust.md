@@ -64,5 +64,3 @@ rule they are refused by design, accepting reduced coverage for clone resistance
 - Local checks are deliberately strict (exactly one SignerInfo, DG1 mandatory, every presented
   DG must be covered by the SOD, document number and both dates must be present in the scan), so
   some malformed-but-genuine chips are refused rather than waved through.
-- The legacy `/v1/id-scan` path carries no raw chip data, so `chip-trusted` is always false there
-  and the default passport rule rejects it (with `trust.required`, the path is refused outright).

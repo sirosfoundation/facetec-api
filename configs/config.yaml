@@ -7,8 +7,8 @@ server:
   host: "0.0.0.0"
   port: 8080
 
-  # Maximum number of biometric requests (process-request, liveness, id-scan,
-  # session-token) processed concurrently. Each request amplifies payload size
+  # Maximum number of process-request calls processed concurrently.
+  # Each request amplifies payload size
   # ~3-4× in memory; this cap prevents OOM under sustained concurrency.
   # Set to 0 to disable the limit.
   max_concurrent_biometric: 10
@@ -90,8 +90,6 @@ trust:
 
 # ── Session (in-memory only, never persisted) ─────────────────────────────────
 session:
-  # How long a FaceMap is held between liveness and id-scan steps.
-  liveness_ttl: "2m"
   # How long a credential offer is available for wallet redemption.
   offer_ttl: "5m"
   # How long FaceTec Server's liveness verdict for a /process-request session
@@ -105,7 +103,7 @@ security:
   # app_key: ""
   # app_key_path: "/run/secrets/app_key"
 
-  # Per-IP rate limiting on biometric endpoints (POST /liveness, /id-scan, /session-token).
+  # Per-IP rate limiting on the biometric endpoint (POST /process-request).
   rate_limit:
     enabled: true
     requests_per_minute: 10

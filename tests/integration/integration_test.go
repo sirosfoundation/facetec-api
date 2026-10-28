@@ -92,8 +92,7 @@ func testConfig(appKey string, rateLimitEnabled bool) *config.Config {
 			Port: 0,
 		},
 		Session: config.SessionConfig{
-			LivenessTTL: 2 * time.Minute,
-			OfferTTL:    5 * time.Minute,
+			OfferTTL: 5 * time.Minute,
 		},
 		Security: config.SecurityConfig{
 			AppKey: appKey,
