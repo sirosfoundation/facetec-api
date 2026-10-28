@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/gmrtd/gmrtd/document"
 )
@@ -313,8 +314,8 @@ func parseFaceTecGroupedFields(m map[string]any) (DocumentData, bool, error) {
 		GivenName:      fields["firstName"],
 		FamilyName:     fields["lastName"],
 		DocumentNumber: fields["idNumber"],
-		DateOfBirth:    normalizeFaceTecDate(fields["dateOfBirth"]),
-		DateOfExpiry:   normalizeFaceTecDate(fields["dateOfExpiration"]),
+		DateOfBirth:    normalizeFaceTecDate(fields["dateOfBirth"], true),
+		DateOfExpiry:   normalizeFaceTecDate(fields["dateOfExpiration"], false),
 		Nationality:    fields["nationality"],
 		Sex:            normalizeSex(fields["sex"]),
 		IssuingCountry: firstNonEmpty(fields["countryCode"], docCountry),
@@ -421,9 +422,20 @@ func extractPortraitFromDG2(documentData map[string]any) string {
 	return base64.StdEncoding.EncodeToString(dg2.Images[0].Image)
 }
 
+// now is overridable in tests; a two-digit birth year is read against it.
+var now = time.Now
+
 // normalizeFaceTecDate converts FaceTec date formats to YYYY-MM-DD.
-// Known formats: "18 FEB/FEB 1987", "18/02/1987", "1987-02-18", "18 FEB 1987".
-func normalizeFaceTecDate(s string) string {
+// Known formats: "18 FEB/FEB 1987", "11 APR APR 30", "18/02/1987",
+// "1987-02-18", "18 FEB 1987".
+//
+// birth selects the century of a two-digit year, the way ICAO 9303-3 reads an
+// MRZ date (see emrtd.mrzDateToISO, which this deliberately matches rather
+// than introducing a second rule): an expiry is always 20xx, a birth date is
+// 20xx unless that falls in the future, in which case it is 19xx. Go's own
+// two-digit-year handling is not used - it maps 69..99 to 19xx and 00..68 to
+// 20xx unconditionally, so it reads a birth year of "55" as 2055.
+func normalizeFaceTecDate(s string, birth bool) string {
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return ""
@@ -440,12 +452,27 @@ func normalizeFaceTecDate(s string) string {
 				return t.Format("2006-01-02")
 			}
 		}
+		for _, layout := range twoDigitYearLayouts {
+			if t, err := time.Parse(layout, candidate); err == nil {
+				return withMRZCentury(t, birth).Format("2006-01-02")
+			}
+		}
 	}
 
 	// Return as-is if we can't parse it; downstream will see the raw value.
 	// MapPhotoIDClaims then leaves the claim out entirely, so the caller logs
 	// a warning naming the field — see apiv1.logUnparseableDates.
 	return s
+}
+
+// withMRZCentury re-reads the two-digit year Go guessed, per ICAO 9303-3.
+func withMRZCentury(t time.Time, birth bool) time.Time {
+	yy := t.Year() % 100
+	year := 2000 + yy
+	if birth && time.Date(year, t.Month(), t.Day(), 0, 0, 0, 0, time.UTC).After(now()) {
+		year = 1900 + yy
+	}
+	return time.Date(year, t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
 }
 
 // dateLayouts are the shapes FaceTec's OCR has been seen to report a date in,
@@ -467,6 +494,18 @@ var dateLayouts = []string{
 	"01/02/2006",
 }
 
+// twoDigitYearLayouts are the same shapes with a two-digit year, as printed in
+// the visual inspection zone of many passports ("11 APR APR 30"). Tried only
+// after every four-digit layout has failed, so a full year is never truncated,
+// and the century is then decided by withMRZCentury rather than by Go.
+var twoDigitYearLayouts = []string{
+	"02 Jan 06",
+	"2 Jan 06",
+	"02.01.06",
+	"2.1.06",
+	"02/01/06",
+}
+
 // faceTecDateCandidates expands a raw FaceTec date into the strings worth
 // trying to parse, most likely first.
 //
@@ -481,31 +520,69 @@ var dateLayouts = []string{
 //
 // The English half is taken first and the local-language half second, so a
 // document that prints them the other way round still parses.
+//
+// The separator is not always a slash. A passport whose two month
+// abbreviations coincide prints them as two words — "11 APR APR 30" — and an
+// unseparated pair is handled the same way, one half at a time (#71).
 func faceTecDateCandidates(s string) []string {
-	idx := strings.Index(s, "/")
-	if idx <= 0 {
-		return []string{s}
-	}
+	fields := strings.Fields(s)
 
 	// Pattern: "DD MON1/MON2 YYYY" — a slash inside one space-separated field.
 	// A slash-separated date ("02/01/2006") has no such field and is left alone.
-	fields := strings.Fields(s)
 	for i, f := range fields {
 		slash := strings.Index(f, "/")
 		if slash <= 0 || slash == len(f)-1 {
 			continue
 		}
+		rest := append(append([]string{}, fields[:i]...), fields[i+1:]...)
+		return monthPairCandidates(rest, i, f[:slash], f[slash+1:], s)
+	}
 
-		second := append(append([]string{}, fields...), nil...)
-		second[i] = f[slash+1:]
-
-		first := append(append([]string{}, fields...), nil...)
-		first[i] = f[:slash]
-
-		return []string{strings.Join(second, " "), strings.Join(first, " "), s}
+	// Pattern: "DD MON1 MON2 YYYY" — two adjacent all-letter fields. A date has
+	// exactly one month, so a second one beside it is the other language's
+	// abbreviation. Anchored on adjacency rather than on the month names, which
+	// are not all English: "FEB 18, 1987" and "01 DEC 2025" have one such field
+	// and are left alone.
+	for i := 0; i+1 < len(fields); i++ {
+		if isMonthWord(fields[i]) && isMonthWord(fields[i+1]) {
+			rest := append(append([]string{}, fields[:i]...), fields[i+2:]...)
+			return monthPairCandidates(rest, i, fields[i], fields[i+1], s)
+		}
 	}
 
 	return []string{s}
+}
+
+// monthPairCandidates rebuilds fields with month at position i, second half
+// first, then the first half, then the original.
+func monthPairCandidates(fields []string, i int, first, second, original string) []string {
+	with := func(month string) string {
+		out := make([]string, 0, len(fields)+1)
+		out = append(out, fields[:i]...)
+		out = append(out, month)
+		out = append(out, fields[i:]...)
+		return strings.Join(out, " ")
+	}
+	if first == second {
+		return []string{with(second), original}
+	}
+	return []string{with(second), with(first), original}
+}
+
+// isMonthWord reports whether f could be a month abbreviation or name: all
+// letters, and more than one of them. Two is the minimum because some
+// languages abbreviate to two letters, and rejecting those would turn a
+// parseable pair into an unparseable date rather than merely skipping it.
+func isMonthWord(f string) bool {
+	if len([]rune(f)) < 2 {
+		return false
+	}
+	for _, r := range f {
+		if !unicode.IsLetter(r) {
+			return false
+		}
+	}
+	return true
 }
 
 func normalizeSex(s string) string {
