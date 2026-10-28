@@ -1,7 +1,6 @@
 package apiv1
 
 import (
-	"errors"
 	"fmt"
 	"testing"
 
@@ -115,34 +114,4 @@ func TestProcessRequest_ChipFaceGateAfterNFCGate(t *testing.T) {
 	resp, err := c.ProcessRequest(ctx, provenSession(t, c, ctx))
 	require.NoError(t, err)
 	assert.Equal(t, string(idverrors.CodeNFCSkipped), resp.CredentialIssueErrCode)
-}
-
-func TestSubmitIDScan_ChipFaceMatch(t *testing.T) {
-	for _, tt := range []struct {
-		name      string
-		chipMatch string
-		want      idverrors.Code
-	}{
-		{"not reported", "", idverrors.CodeChipPhotoMismatch},
-		{"below the minimum", `"matchLevelNFCToFaceMap": 3,`, idverrors.CodeChipPhotoMismatch},
-		{"passes, reaches the policy", `"matchLevelNFCToFaceMap": 8,`, idverrors.CodePolicyRejected},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			c, livenessID := newTestClientForIDScan(t, `{
-				"success": true,
-				"faceMatchLevel": 9,
-				`+tt.chipMatch+`
-				"nfcVerified": true,
-				"mrzVerified": true,
-				"barcodeVerified": true,
-				"documentData": {"givenName": "Alice", "familyName": "Test", "documentType": "passport", "dateOfExpiry": "2099-12-31"}
-			}`)
-			ctx := tenant.WithStdContext(t.Context(), &tenant.Context{ID: "test-tenant", Policy: noRulesPolicy(t)})
-
-			_, _, err := c.SubmitIDScan(ctx, livenessID, &facetec.IDScanRequest{})
-			var idvErr *idverrors.Error
-			require.True(t, errors.As(err, &idvErr), "got %v", err)
-			assert.Equal(t, tt.want, idvErr.Code)
-		})
-	}
 }

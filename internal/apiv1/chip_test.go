@@ -289,19 +289,6 @@ func TestAssessChip_EmptyChipFieldsNotFilledFromOCR(t *testing.T) {
 	}
 }
 
-func TestSubmitIDScan_LegacyPathNeverChipTrusted(t *testing.T) {
-	c, livenessID := newTestClientForIDScan(t, `{
-		"success": true, "faceMatchLevel": 7, "nfcVerified": true, "mrzVerified": true, "barcodeVerified": true,
-		"documentData": {"documentType": "passport"}
-	}`)
-	c.chip = emrtd.NewChecker(&fakeEvaluator{}, true)
-	tc := &tenant.Context{ID: "t", Policy: noRulesPolicy(t)}
-	_, _, err := c.SubmitIDScan(tenant.WithStdContext(t.Context(), tc), livenessID, &facetec.IDScanRequest{})
-	var idvErr *idverrors.Error
-	require.True(t, errors.As(err, &idvErr))
-	assert.Equal(t, idverrors.CodeChipUntrusted, idvErr.Code, "NFC verified by FaceTec alone is chip evidence")
-}
-
 func TestNewChipChecker(t *testing.T) {
 	assert.True(t, newChipChecker(config.TrustConfig{Required: true}).Required())
 	assert.False(t, newChipChecker(config.TrustConfig{}).Required())

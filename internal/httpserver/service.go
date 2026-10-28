@@ -118,9 +118,6 @@ func (s *Service) registerRoutes(r *gin.Engine, registry *tenant.Registry) {
 		// Biometric endpoints — additionally rate-limited and concurrency-capped.
 		bio := v1.Group("", rl, mc)
 		bio.POST("/process-request", s.endpointProcessRequest)
-		bio.POST("/session-token", s.endpointSessionToken)
-		bio.POST("/liveness", s.endpointLiveness)
-		bio.POST("/id-scan", s.endpointIDScan)
 
 		// Offer redemption — authenticated, no rate limit (wallet pull).
 		v1.GET("/offer/:txid", s.endpointOffer)

@@ -42,66 +42,6 @@ func NewClient(serverURL, deviceKey string, httpClient *http.Client) *Client {
 	}
 }
 
-// GetSessionToken requests a new session token from the FaceTec Server.
-func (c *Client) GetSessionToken(ctx context.Context) (*SessionTokenResponse, error) {
-	resp, err := c.post(ctx, "/session-token", nil)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("facetec: session-token: unexpected status %d", resp.StatusCode)
-	}
-	var result SessionTokenResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("facetec: session-token: decode response: %w", err)
-	}
-	return &result, nil
-}
-
-// SubmitLiveness forwards a FaceScan to the FaceTec Server for liveness verification.
-// The returned LivenessCheckResult.FaceMap must be held in memory only and never written to disk.
-func (c *Client) SubmitLiveness(ctx context.Context, req *LivenessCheckRequest) (*LivenessCheckResult, error) {
-	resp, err := c.post(ctx, "/liveness-3d", req)
-	req.FaceScanBase64 = "" // release biometric payload for GC
-	req.AuditTrailBase64 = nil
-	req.LowQualityAuditTrailBase64 = nil
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("facetec: liveness: unexpected status %d", resp.StatusCode)
-	}
-	var result LivenessCheckResult
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("facetec: liveness: decode response: %w", err)
-	}
-	return &result, nil
-}
-
-// SubmitIDScan forwards an ID scan to the FaceTec Server for face matching and OCR.
-// req.FaceMap must be populated from the in-memory liveness session before calling this method.
-func (c *Client) SubmitIDScan(ctx context.Context, req *IDScanRequest) (*IDScanResult, error) {
-	resp, err := c.post(ctx, "/match-3d-3d", req)
-	req.IDScanBase64 = "" // release scan data for GC
-	req.IDScanFrontImagesCompressedBase64 = nil
-	req.IDScanBackImagesCompressedBase64 = nil
-	req.FaceMap = ""
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("facetec: id-scan: unexpected status %d", resp.StatusCode)
-	}
-	var result IDScanResult
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("facetec: id-scan: decode response: %w", err)
-	}
-	return &result, nil
-}
-
 // ProcessRequest forwards an opaque FaceTec request blob to the FaceTec Server.
 // The response payload is returned as a generic JSON object so the HTTP layer can
 // preserve FaceTec's SDK-facing contract while augmenting it with app metadata.

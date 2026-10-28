@@ -25,60 +25,45 @@ func TestDocumentLogging(t *testing.T) {
 	docJSON, err := json.Marshal(doc)
 	require.NoError(t, err)
 
-	for _, path := range []string{"id-scan", "process-request"} {
-		for _, tt := range []struct {
-			name    string
-			level   zapcore.Level
-			include bool
-			wantPII bool
-		}{
-			{"debug default", zap.DebugLevel, false, false},
-			{"debug opt-in", zap.DebugLevel, true, true},
-			{"info opt-in", zap.InfoLevel, true, false},
-			{"warn opt-in", zap.WarnLevel, true, false},
-			{"error opt-in", zap.ErrorLevel, true, false},
-		} {
-			t.Run(path+"/"+tt.name, func(t *testing.T) {
-				var c *Client
-				var livenessID string
-				if path == "id-scan" {
-					c, livenessID = newTestClientForIDScan(t, fmt.Sprintf(
-						`{"success":true,"nfcVerified":false,"documentData":%s}`, docJSON))
-					t.Cleanup(c.sessions.Close)
-				} else {
-					c = newTestClientForProcessRequest(t, fmt.Sprintf(
-						`{"idScanResultsSoFar":{"photoIDNextStepEnumInt":4,"matchLevel":7,"documentData":%s}}`, docJSON))
-				}
-				c.cfg.Logging.IncludePII = tt.include
-				var output bytes.Buffer
-				c.log = zap.New(zapcore.NewCore(
-					zapcore.NewJSONEncoder(zap.NewProductionEncoderConfig()),
-					zapcore.AddSync(&output), tt.level,
-				))
-				ctx := tenant.WithStdContext(t.Context(), &tenant.Context{ID: "test-tenant"})
-				if path == "id-scan" {
-					_, _, err := c.SubmitIDScan(ctx, livenessID, &facetec.IDScanRequest{})
-					require.Error(t, err, "NFC gate remains enforced")
-				} else {
-					resp, err := c.ProcessRequest(ctx, &facetec.ProcessRequestRequest{RequestBlob: "opaque"})
-					require.NoError(t, err)
-					assert.NotEmpty(t, resp.CredentialIssueErrCode, "liveness gate remains enforced")
-				}
-				logs := output.String()
-				for _, pii := range []string{doc.GivenName, doc.FamilyName, doc.DocumentNumber, doc.DateOfBirth, doc.DateOfExpiry, doc.MRZLine1} {
-					if tt.wantPII {
-						assert.Contains(t, logs, pii)
-					} else {
-						assert.NotContains(t, logs, pii)
-					}
-				}
-				assert.NotContains(t, logs, doc.Portrait, "portraits must never be logged")
+	for _, tt := range []struct {
+		name    string
+		level   zapcore.Level
+		include bool
+		wantPII bool
+	}{
+		{"debug default", zap.DebugLevel, false, false},
+		{"debug opt-in", zap.DebugLevel, true, true},
+		{"info opt-in", zap.InfoLevel, true, false},
+		{"warn opt-in", zap.WarnLevel, true, false},
+		{"error opt-in", zap.ErrorLevel, true, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			c := newTestClientForProcessRequest(t, fmt.Sprintf(
+				`{"idScanResultsSoFar":{"photoIDNextStepEnumInt":4,"matchLevel":7,"documentData":%s}}`, docJSON))
+			c.cfg.Logging.IncludePII = tt.include
+			var output bytes.Buffer
+			c.log = zap.New(zapcore.NewCore(
+				zapcore.NewJSONEncoder(zap.NewProductionEncoderConfig()),
+				zapcore.AddSync(&output), tt.level,
+			))
+			ctx := tenant.WithStdContext(t.Context(), &tenant.Context{ID: "test-tenant"})
+			resp, err := c.ProcessRequest(ctx, &facetec.ProcessRequestRequest{RequestBlob: "opaque"})
+			require.NoError(t, err)
+			assert.NotEmpty(t, resp.CredentialIssueErrCode, "liveness gate remains enforced")
+			logs := output.String()
+			for _, pii := range []string{doc.GivenName, doc.FamilyName, doc.DocumentNumber, doc.DateOfBirth, doc.DateOfExpiry, doc.MRZLine1} {
 				if tt.wantPII {
-					assert.Contains(t, logs, fmt.Sprintf("[%d bytes omitted]", len(doc.Portrait)))
+					assert.Contains(t, logs, pii)
+				} else {
+					assert.NotContains(t, logs, pii)
 				}
-				assert.Equal(t, tt.wantPII, bytes.Contains(output.Bytes(), []byte("document_data")))
-			})
-		}
+			}
+			assert.NotContains(t, logs, doc.Portrait, "portraits must never be logged")
+			if tt.wantPII {
+				assert.Contains(t, logs, fmt.Sprintf("[%d bytes omitted]", len(doc.Portrait)))
+			}
+			assert.Equal(t, tt.wantPII, bytes.Contains(output.Bytes(), []byte("document_data")))
+		})
 	}
 }
 

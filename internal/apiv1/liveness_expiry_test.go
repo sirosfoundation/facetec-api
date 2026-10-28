@@ -2,7 +2,6 @@ package apiv1
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -205,25 +204,4 @@ func TestDocumentExpiryRejection(t *testing.T) {
 	assert.False(t, rejected, "01:30 CEST on the 4th is still the 3rd in UTC")
 	_, _, rejected = documentExpiryRejection(facetec.DocumentData{DateOfExpiry: "2026-10-03"}, time.Date(2026, 10, 4, 2, 30, 0, 0, amsterdam))
 	assert.True(t, rejected, "02:30 CEST on the 4th is the 4th in UTC")
-}
-
-func TestSubmitIDScan_ExpiredDocument_Rejected(t *testing.T) {
-	c, livenessID := newTestClientForIDScan(t, `{
-		"success": true,
-		"faceMatchLevel": 7,
-		"matchLevelNFCToFaceMap": 7,
-		"nfcVerified": true,
-		"mrzVerified": true,
-		"barcodeVerified": true,
-		"documentData": {"givenName": "Alice", "familyName": "Test", "documentType": "passport", "dateOfExpiry": "2020-01-31"}
-	}`)
-	ctx := tenant.WithStdContext(t.Context(), &tenant.Context{ID: "test-tenant", Policy: noRulesPolicy(t)})
-
-	docID, offerURL, err := c.SubmitIDScan(ctx, livenessID, &facetec.IDScanRequest{})
-	require.Error(t, err)
-	var idvErr *idverrors.Error
-	require.True(t, errors.As(err, &idvErr))
-	assert.Equal(t, idverrors.CodeDocumentExpired, idvErr.Code)
-	assert.Empty(t, docID)
-	assert.Empty(t, offerURL)
 }
