@@ -29,18 +29,7 @@ jobs:
           GOWORK=off go test -race \
             -covermode=atomic \
             -coverprofile=coverage.out \
-            ./cmd/server/... \
-            ./internal/apiv1/... \
-            ./internal/auditlog/... \
-            ./internal/config/... \
-            ./internal/emrtd/... \
-            ./internal/facetec/... \
-            ./internal/issuerclient/... \
-            ./internal/middleware/... \
-            ./internal/policy/... \
-            ./internal/session/... \
-            ./internal/tenant/... \
-            ./tests/...
+            ./...
 
       # The production build tag changes what config.Validate accepts (#85), so
       # the suite has to run both ways or one side of every build-mode test is
