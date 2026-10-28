@@ -39,7 +39,7 @@ technical and organisational measures (TOMs), and considerations relevant to GDP
 
 | Data element | Source | Destination |
 |---|---|---|
-| Given name | OCR of scanned document | VC issuer (gRPC) → included in issued credential |
+| Given name | OCR of scanned document | VC issuer (apigw REST) → included in issued credential |
 | Family name | OCR | VC issuer → credential |
 | Date of birth | OCR | VC issuer → credential |
 | Date of expiry | OCR | VC issuer → credential |
@@ -103,7 +103,7 @@ zeroing guarantees: restrict access and retention, and delete them after debuggi
 │    ⑥ FaceMap bytes zeroed (clear()) immediately                             │
 │    ⑦ DocumentData evaluated against SPOCP policy                           │
 │    ⑧ MRZ lines stripped from DocumentData                                  │
-│    ⑨ Stripped DocumentData forwarded ─────────────────────────────────────► VC Issuer (gRPC)
+│    ⑨ Stripped DocumentData forwarded ─────────────────────────────────────► VC Issuer (REST)
 │    ⑩ Signed credential stored in RAM (TTL = 5 min, one-time-use)           │
 │                                                                             │
 │  GET /v1/offer/:txid                                                        │
@@ -116,7 +116,7 @@ zeroing guarantees: restrict access and retention, and delete them after debuggi
 | Destination | Data sent |
 |---|---|
 | FaceTec Server (HTTPS) | FaceScan, AuditTrail, ID scan images, FaceMap (from RAM); all raw biometric data |
-| VC Issuer (gRPC) | DocumentData minus MRZ lines: name, DoB, nationality, sex, doc number, doc type, expiry, issuing country |
+| VC Issuer (apigw REST, HTTPS) | DocumentData minus MRZ lines: name, DoB, nationality, sex, doc number, doc type, expiry, issuing country |
 | Mobile wallet / client | Signed verifiable credential (opaque token; content determined by issuer) |
 
 **Data that never leaves facetec-api:**
