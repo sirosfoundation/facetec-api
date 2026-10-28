@@ -45,3 +45,4 @@ security:
 
 logging:
   level: "info"
+  format: "json"

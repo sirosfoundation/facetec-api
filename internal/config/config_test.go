@@ -211,6 +211,35 @@ func TestValidate_IncludePIIRequiresDebugLevel(t *testing.T) {
 	}
 }
 
+func TestValidate_LogFormat(t *testing.T) {
+	valid := func(format string) *config.Config {
+		return &config.Config{
+			FaceTec: config.FaceTecConfig{ServerURL: "https://x"},
+			Issuer:  config.IssuerConfig{Addr: "https://x", Scope: "s"},
+			JWT:     config.JWTConfig{Secret: "shared-secret"},
+			Logging: config.LoggingConfig{Format: format},
+		}
+	}
+
+	for _, format := range []string{"", config.LogFormatConsole, config.LogFormatJSON} {
+		t.Run("accepts/"+format, func(t *testing.T) {
+			if err := valid(format).Validate(); err != nil {
+				t.Errorf("logging.format %q: unexpected error: %v", format, err)
+			}
+		})
+	}
+
+	// A typo must stop the process rather than silently fall back to console
+	// and leave an operator wondering why their shipper sees no JSON.
+	for _, format := range []string{"JSON", "Console", "text", "production"} {
+		t.Run("rejects/"+format, func(t *testing.T) {
+			if err := valid(format).Validate(); err == nil {
+				t.Errorf("logging.format %q: expected an error", format)
+			}
+		})
+	}
+}
+
 func TestValidate_WithoutDeviceKey(t *testing.T) {
 	cfg := &config.Config{
 		FaceTec: config.FaceTecConfig{ServerURL: "https://x"},
