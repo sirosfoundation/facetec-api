@@ -504,4 +504,4 @@ The Docker image is built on `gcr.io/distroless/static-debian12` and runs as UID
 
 ## License
 
-Apache-2.0 — see [LICENSE](LICENSE).
+BSD-2-Clause — see [LICENSE](LICENSE).
