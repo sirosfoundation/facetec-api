@@ -237,9 +237,25 @@ type TrustConfig struct {
 // LoggingConfig controls log output.
 type LoggingConfig struct {
 	Level string `yaml:"level" envconfig:"LOG_LEVEL"`
+	// Format selects the log encoding: "console" (default, human-readable)
+	// or "json" (one object per line, for a log shipper or SIEM).
+	//
+	// It is deliberately only the encoder. Its predecessor, the
+	// logging.production bool, also decided whether Validate required an
+	// auth mechanism and whether a policy-bypassing debug endpoint was
+	// registered; both of those are now settled unconditionally, and this
+	// key must not grow into "are we in production" again.
+	Format string `yaml:"format" envconfig:"LOG_FORMAT"`
 	// IncludePII enables sensitive document data at debug level. Never use in production.
 	IncludePII bool `yaml:"include_pii" envconfig:"LOG_INCLUDE_PII"`
 }
+
+// Log formats accepted in LoggingConfig.Format. An empty value means
+// LogFormatConsole.
+const (
+	LogFormatConsole = "console"
+	LogFormatJSON    = "json"
+)
 
 // AuditConfig controls persistent IPV session audit logging.
 type AuditConfig struct {
@@ -290,6 +306,12 @@ func Load(path string) (*Config, error) {
 func (c *Config) Validate() error {
 	if c.Logging.IncludePII && c.Logging.Level != "debug" {
 		return fmt.Errorf("config: logging.include_pii requires logging.level: debug")
+	}
+	switch c.Logging.Format {
+	case "", LogFormatConsole, LogFormatJSON:
+	default:
+		return fmt.Errorf("config: logging.format must be %q or %q, got %q",
+			LogFormatConsole, LogFormatJSON, c.Logging.Format)
 	}
 	if c.FaceTec.ServerURL == "" {
 		return fmt.Errorf("config: facetec.server_url is required")

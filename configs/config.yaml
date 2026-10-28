@@ -135,6 +135,10 @@ jwt:
 logging:
   # Log level: debug, info, warn, error
   level: "info"
+  # Encoding: console (default, human-readable) or json (one object per line,
+  # for a log shipper or SIEM). Only the encoding -- level, auth requirements
+  # and everything else are configured independently.
+  format: "console"
   # Include sensitive NFC/OCR identity data only at debug level (LOG_INCLUDE_PII).
   # DEVELOPMENT/TEST ONLY — never enable in production. Emits a startup warning.
   include_pii: false
