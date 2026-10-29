@@ -229,6 +229,9 @@ func TestValidate_LogFormat(t *testing.T) {
 			Issuer:  config.IssuerConfig{Addr: "https://x", Scope: "s"},
 			JWT:     config.JWTConfig{Secret: "shared-secret"},
 			Logging: config.LoggingConfig{Format: format},
+			// Without this the production build refuses the config for a
+			// reason that has nothing to do with logging.format (#85).
+			Trust: prodTrust(),
 		}
 	}
 
