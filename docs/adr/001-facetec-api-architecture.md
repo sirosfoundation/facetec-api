@@ -2,12 +2,17 @@
 
 ## Status
 
-Accepted. Amended 2026-10-28: the legacy split flow described under "Scan Flow" was removed
-(issue #82). `POST /process-request` is the only mobile-facing contract. The two consequences
-for this ADR's reasoning: facetec-api no longer receives or holds a FaceMap, since every
-biometric payload now stays inside the blobs it relays undecoded; and the in-memory FaceMap
-store that the privacy-by-design constraint below was written about no longer exists. The
-rest of the decision stands.
+Accepted. Amended 2026-10-28 twice. First, the legacy split flow described under "Scan Flow" was
+removed (issue #82). `POST /process-request` is the only mobile-facing contract. The two
+consequences for this ADR's reasoning: facetec-api no longer receives or holds a FaceMap, since
+every biometric payload now stays inside the blobs it relays undecoded; and the in-memory FaceMap
+store that the privacy-by-design constraint below was written about no longer exists. Second, the
+`vc` issuer is reached over the apigw's REST API, not gRPC (issue #34). `internal/issuerclient` is
+a plain `net/http` client POSTing to `/api/v1/datastore` and `/api/v1/datastore/preauth_offer`, and
+`google.golang.org/grpc` is no longer even a direct dependency. The transport changed; the decision
+this ADR records — that the issuer sits behind a service boundary this security zone crosses with
+the minimised `DocumentData` and nothing biometric — stands unchanged. The rest of the decision
+stands.
 
 ## Context
 
@@ -18,7 +23,7 @@ scan must produce a verifiable credential through the existing `vc` issuer servi
 Key constraints:
 - **Privacy by design**: Biometric data (FaceScan blobs, FaceMaps) must never be written to disk.
 - **Separate security zone**: The service handles raw biometric data and must be isolated from the
-  broader wallet backend. It communicates with the `vc` issuer exclusively via gRPC.
+  broader wallet backend. It communicates with the `vc` issuer exclusively over the apigw REST API.
 - **Policy-based acceptance**: What constitutes a "good enough" scan must be configurable without
   code changes, using SPOCP rules (go-spocp).
 - **Credential format flexibility**: The resulting credential must support SD-JWT, mDL (ISO 18013-5),
@@ -43,7 +48,7 @@ Mobile App (FaceTec SDK)
   │  │ (gin)         │  │
   │  │ session mgr   │  │  in-memory only, TTL-evicted, no disk writes
   │  │ policy engine │  │──── go-spocp SPOCP rules (configurable .spoc files)
-  │  │ apiv1/client  │  │──── gRPC → vc IssuerService (MakeSDJWT / MakeMDoc)
+  │  │ apiv1/client  │  │──── REST → vc apigw (datastore / preauth_offer)
   │  └───────────────┘  │
   └─────────────────────┘
         │
@@ -73,7 +78,7 @@ response, and augments successful photo-ID matches with local credential-offer m
   directory.
 
 4. **Credential Issuance** — On policy pass, the OCR-extracted `DocumentData` (no biometrics) is
-  JSON-encoded and sent to the `vc` IssuerService via gRPC. The resulting signed credential is
+  JSON-encoded and sent to the `vc` apigw over REST. The resulting signed credential is
   stored in a second in-memory session (the credential offer), TTL 5 minutes, one-time-use.
 
 5. **Augmented Response** — facetec-api adds `transactionId` and `credentialOfferURI` to the
@@ -117,10 +122,10 @@ handoff until the FaceTec UI exits.
   Externalising acceptance thresholds as rules enables per-deployment tuning without recompilation.
 - **In-memory session store** (no Redis, no disk) is the simplest mechanism that satisfies the
   "never persist biometrics" constraint. The TTL prevents unbounded growth.
-- **gRPC to `vc` issuer** follows the established inter-service boundary in this workspace and
+- **A dedicated client to the `vc` issuer** follows the established inter-service boundary in this workspace and
   ensures biometrics never reach the credential signing service.
 - **Credential format via config** avoids baking in SD-JWT as the only option; mDL and VC 2.0
-  are supported by the same `vc` gRPC API.
+  are supported by the same `vc` API.
 
 ## Consequences
 

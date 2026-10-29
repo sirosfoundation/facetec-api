@@ -10,14 +10,14 @@
 A Go microservice that bridges the [FaceTec](https://www.facetec.com/) biometric SDK (running
 on a mobile device) with a verifiable-credential (VC) issuer. It acts as a security gateway:
 biometric liveness and photo-ID scan results are validated against configurable SPOCP policy,
-and — only on acceptance — a verifiable credential is issued through a gRPC back-end.
+and — only on acceptance — a verifiable credential is issued through the vc apigw's REST API.
 
 ```
 Mobile SDK  →  facetec-api  →  FaceTec Server  (liveness + ID scan)
                    │
                    ├── SPOCP policy engine  (accept / reject)
                    │
-                   └──  vc issuer (gRPC)  →  SD-JWT / mDoc / VC 2.0
+                   └──  vc apigw (REST)  →  SD-JWT / mDoc / VC 2.0
 ```
 
 Biometric data (FaceMaps, raw scan images) **never leaves process memory** and is never written
@@ -68,23 +68,34 @@ by environment variables. The full annotated reference is [configs/config.yaml](
 | `facetec.tls.ca_file` | `FACETEC_TLS_CA_FILE` | *(optional)* | CA certificate for outbound FaceTec TLS |
 | `facetec.tls.cert_file` | `FACETEC_TLS_CERT_FILE` | *(optional)* | Client certificate for FaceTec mTLS |
 | `facetec.tls.key_file` | `FACETEC_TLS_KEY_FILE` | *(optional)* | Client private key for FaceTec mTLS |
-| `issuer.addr` | `ISSUER_ADDR` | *(required)* | gRPC address of the vc issuer (e.g. `issuer:8090`) |
-| `issuer.tls` | `ISSUER_TLS` | `false` | Enable TLS on the gRPC issuer connection |
-| `issuer.ca_file` | `ISSUER_CA_FILE` | *(optional)* | CA certificate for the issuer gRPC connection |
-| `issuer.cert_file` | `ISSUER_CERT_FILE` | *(optional)* | Client certificate for issuer mTLS |
-| `issuer.key_file` | `ISSUER_KEY_FILE` | *(optional)* | Client private key for issuer mTLS |
+| `issuer.addr` | `ISSUER_ADDR` | *(required)* | Base URL of the vc apigw, scheme included (e.g. `https://issuer.example.org`) |
+| `issuer.tls` | `ISSUER_TLS` | `false` | Verify the apigw's TLS certificate against `ca_file`, and send a client certificate when one is configured. Has no effect on a plain `http://` base URL |
+| `issuer.ca_file` | `ISSUER_CA_FILE` | *(optional)* | CA certificate for the apigw's TLS certificate |
+| `issuer.cert_file` | `ISSUER_CERT_FILE` | *(optional)* | Client certificate for apigw mTLS |
+| `issuer.key_file` | `ISSUER_KEY_FILE` | *(optional)* | Client private key for apigw mTLS |
+| `issuer.api_key` | `ISSUER_API_KEY` | *(optional)* | Bearer token sent to the apigw on each request |
+| `issuer.api_key_path` | `ISSUER_API_KEY_PATH` | *(optional)* | File containing the apigw Bearer token (takes precedence over `api_key`) |
 | `issuer.scope` | `ISSUER_SCOPE` | *(required)* | Default credential scope URI |
+| `issuer.authentic_source` | `ISSUER_AUTHENTIC_SOURCE` | `facetec-api` | Source system identifier sent to the apigw |
+| `issuer.vct` | `ISSUER_VCT` | *(optional)* | Verifiable Credential Type sent with the upload |
 | `issuer.format` | `ISSUER_FORMAT` | `sdjwt` | Default credential format: `sdjwt`, `mdoc`, `vc20`. `mdoc` uploads an [EWC RFC013](https://github.com/EWC-consortium/eudi-wallet-rfcs/blob/main/ewc-rfc013-issue-photoid.md) Photo ID, see below |
 | `issuer.issuing_authority` | `ISSUER_ISSUING_AUTHORITY` | `issuer.authentic_source` | Photo ID `issuing_authority_unicode` (`mdoc` only) |
 | `issuer.issuing_country` | `ISSUER_ISSUING_COUNTRY` | scanned document's country | Photo ID `issuing_country`, ISO 3166-1 alpha-2 (`mdoc` only) |
 | `policy.rules_dir` | `POLICY_RULES_DIR` | *(empty)* | Directory of `.spoc` rule files |
 | `trust.pdp_url` | `TRUST_PDP_URL` | *(empty)* | Base origin of the go-trust AuthZEN PDP (must be `https`, no path; plain `http` only for localhost) that decides whether an eMRTD document signer chains to a reviewed CSCA (`POST {url}/evaluation`). Empty = unconfigured: chips are verified locally but never reported as trusted |
 | `trust.timeout` | `TRUST_TIMEOUT` | `5s` | Timeout of each PDP request attempt (one retry, transport errors only) |
-| `trust.required` | `TRUST_REQUIRED` | `true` | Fail closed: refuse to start without `trust.pdp_url`, and hard-reject any passport scan that presented chip data which is not trusted, independent of the SPOCP rules. Set `false` only for development or when no rule depends on `chip-trusted` |
+| `trust.required` | `TRUST_REQUIRED` | `true` | Fail closed: refuse to start without `trust.pdp_url`, hard-reject **any** document whose chip data is not trusted, and refuse to issue a credential whose identity did not come from a verified, trusted chip (`chip_data_unverified`), independent of the SPOCP rules. **A production build (`-tags production`, which the Dockerfile uses) refuses `false` outright**; a development build accepts it with a startup warning |
 | `session.offer_ttl` | `SESSION_OFFER_TTL` | `5m` | How long a credential offer is held in memory |
 | `session.liveness_proof_ttl` | `SESSION_LIVENESS_PROOF_TTL` | `15m` | How long FaceTec Server's liveness verdict for a `/process-request` session is held, from its liveness step to its final photo ID match result |
 | `logging.level` | `LOG_LEVEL` | `info` | Log level: `debug`, `info`, `warn`, `error` |
+| `logging.format` | `LOG_FORMAT` | `console` | Log encoding: `console` (human-readable) or `json` (one object per line, RFC3339 timestamps, for a log shipper or SIEM). An unrecognised value fails startup |
 | `logging.include_pii` | `LOG_INCLUDE_PII` | `false` | Include sensitive NFC/OCR document data only when `logging.level` is `debug`; other levels prevent startup. **Never enable in production**; emits a startup warning when enabled |
+
+`logging.format: json` writes one JSON object per line to stderr, with RFC3339 nanosecond
+timestamps. It changes only the encoding: the level still comes from `logging.level`, and log
+sampling is deliberately **off**, because zap samples per level and message and this service
+logs every issuance under the single message `AUDIT credential_issued` — sampling would discard
+audit records under load.
 
 Ordinary debug logging does not include document identity data. For isolated test/development
 environments only, set both `LOG_LEVEL=debug` and `LOG_INCLUDE_PII=true` to log parsed
@@ -326,8 +337,37 @@ only when facetec-api itself verified the SOD signature and every data-group has
 document code matches the reported document type, **and** the go-trust PDP trusts the DSC for the issuing state
 (see [ADR-002](docs/adr/002-emrtd-document-signer-trust.md)). Passports need both. Passports whose
 chips lack Active/Chip Authentication (status 1) are therefore refused by design; this is a known
-coverage trade-off. With `trust.required` (passports only), a scan that passes the NFC gate (status 4) but whose raw
-chip data is missing or untrusted is refused with `chip_untrusted`.
+coverage trade-off. With `trust.required`, a scan of **any** document type that passes the NFC gate (status 4) but
+whose raw chip data is missing or untrusted is refused with `chip_untrusted`. This was scoped to passports until
+[#85](https://github.com/sirosfoundation/facetec-api/issues/85): ID cards are ICAO 9303 documents too, signed under
+the same CSCAs, so exempting them meant issuing an ID card credential from a signer nobody vouched for. The cost is
+that an ISO 18013 driving licence is refused until its chips and trust lists are supported.
+
+**Only verified chip data is issued.** A second hard gate, at the point of issuance, refuses a credential whose
+identity claims would have come from OCR of the printed page: the identity must have come from the document's chip
+**and** that chip's signer must be trusted. The code is `chip_data_unverified`, distinct from `chip_untrusted`:
+`chip_untrusted` says the signer is not trusted, `chip_data_unverified` says there was no verified chip identity to
+issue from at all — a chip format this service does not parse, or a chip whose DG1 could not be read. OCR of a data
+page is trivial to forge, and a signature over forged data is worthless without a trusted signer, which is why both
+halves are required.
+
+The gate is deliberately separate from the trust check rather than a clause inside it, so that a later change to the
+trust logic cannot silently reopen the path from OCR to a credential.
+
+### Production builds
+
+`trust.required: false` switches off the trust check and this gate together. That is reasonable on a development
+stack with no PDP and unacceptable in a deployment issuing real credentials, so it is a **build-time** decision
+rather than a runtime one:
+
+```bash
+go build -tags production ./cmd/server   # refuses trust.required: false at startup
+go build ./cmd/server                    # accepts it, with a startup warning
+```
+
+The Dockerfile and `make build-production` set the tag, so every container image is a production build. A build tag
+is decided once by whoever builds the image and cannot be overridden by the deployment it is handed to — unlike a
+config key, which is how the removed `logging.production` flag drifted into meaning three unrelated things.
 
 **Identity from the chip.** Once the SOD signature and the data-group hashes are verified, the
 credential's identity fields come from the chip, not from FaceTec's OCR of the MRZ in the photo:
@@ -447,20 +487,17 @@ make fmt            # gofmt
 make vet            # go vet
 ```
 
-### Regenerating gRPC client code
+### The vc apigw contract
 
-The gRPC stubs under `internal/gen/issuer/apiv1_issuer/` are copied from the `vc` workspace
-sibling. Regenerate them after updating the `vc` proto source:
+`internal/issuerclient` is a plain `net/http` client; there are no generated
+stubs to regenerate. Issuance is two POSTs against `issuer.addr`:
 
-```bash
-./scripts/generate-proto.sh
-```
+| Call | Endpoint | Purpose |
+|---|---|---|
+| `Upload` | `POST {issuer.addr}/api/v1/datastore` | Store the policy-approved document data |
+| `PreauthOffer` | `POST {issuer.addr}/api/v1/datastore/preauth_offer` | Get the OID4VCI `credentialOfferURI` for the wallet |
 
-If `protoc` is available and you want to regenerate from the proto source directly:
-
-```bash
-REGEN=1 ./scripts/generate-proto.sh
-```
+Both carry `issuer.api_key` as a Bearer token when one is configured.
 
 ## Docker
 
@@ -475,4 +512,4 @@ The Docker image is built on `gcr.io/distroless/static-debian12` and runs as UID
 
 ## License
 
-Apache-2.0 — see [LICENSE](LICENSE).
+BSD-2-Clause — see [LICENSE](LICENSE).

@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sirosfoundation/facetec-api/internal/buildmode"
 	"github.com/sirosfoundation/facetec-api/internal/config"
 )
 
@@ -179,6 +180,15 @@ func TestLoad_AppKeyPathError(t *testing.T) {
 
 // ── Validate tests ────────────────────────────────────────────────────────────
 
+// prodTrust is the trust configuration a real deployment gets from
+// defaultConfig(): required, with a PDP. Tests that build a Config literal
+// bypass defaultConfig(), so Trust.Required would be the Go zero value
+// (false) -- which a production build refuses outright (#85). Tests about
+// other fields take this so they assert the same thing under both builds.
+func prodTrust() config.TrustConfig {
+	return config.TrustConfig{Required: true, PDPURL: "https://go-trust.example.org"}
+}
+
 func TestValidate_MissingServerURL(t *testing.T) {
 	cfg := &config.Config{
 		Issuer: config.IssuerConfig{Addr: "x", Scope: "s"},
@@ -205,9 +215,39 @@ func TestValidate_IncludePIIRequiresDebugLevel(t *testing.T) {
 		Issuer:  config.IssuerConfig{Addr: "x", Scope: "s"},
 		JWT:     config.JWTConfig{Secret: "shared-secret"},
 		Logging: config.LoggingConfig{Level: "debug", IncludePII: true},
+		Trust:   prodTrust(),
 	}
 	if err := cfg.Validate(); err != nil {
 		t.Errorf("unexpected error with debug logging: %v", err)
+	}
+}
+
+func TestValidate_LogFormat(t *testing.T) {
+	valid := func(format string) *config.Config {
+		return &config.Config{
+			FaceTec: config.FaceTecConfig{ServerURL: "https://x"},
+			Issuer:  config.IssuerConfig{Addr: "https://x", Scope: "s"},
+			JWT:     config.JWTConfig{Secret: "shared-secret"},
+			Logging: config.LoggingConfig{Format: format},
+		}
+	}
+
+	for _, format := range []string{"", config.LogFormatConsole, config.LogFormatJSON} {
+		t.Run("accepts/"+format, func(t *testing.T) {
+			if err := valid(format).Validate(); err != nil {
+				t.Errorf("logging.format %q: unexpected error: %v", format, err)
+			}
+		})
+	}
+
+	// A typo must stop the process rather than silently fall back to console
+	// and leave an operator wondering why their shipper sees no JSON.
+	for _, format := range []string{"JSON", "Console", "text", "production"} {
+		t.Run("rejects/"+format, func(t *testing.T) {
+			if err := valid(format).Validate(); err == nil {
+				t.Errorf("logging.format %q: expected an error", format)
+			}
+		})
 	}
 }
 
@@ -216,6 +256,7 @@ func TestValidate_WithoutDeviceKey(t *testing.T) {
 		FaceTec: config.FaceTecConfig{ServerURL: "https://x"},
 		Issuer:  config.IssuerConfig{Addr: "x", Scope: "s"},
 		JWT:     config.JWTConfig{Secret: "shared-secret"},
+		Trust:   prodTrust(),
 	}
 	if err := cfg.Validate(); err != nil {
 		t.Errorf("unexpected error: device_key should be optional: %v", err)
@@ -257,6 +298,7 @@ func TestValidate_WithJWTSecret(t *testing.T) {
 		FaceTec: config.FaceTecConfig{ServerURL: "https://x", DeviceKey: "k"},
 		Issuer:  config.IssuerConfig{Addr: "x", Scope: "s"},
 		JWT:     config.JWTConfig{Secret: "shared-secret"},
+		Trust:   prodTrust(),
 	}
 	if err := cfg.Validate(); err != nil {
 		t.Errorf("unexpected error: jwt.secret set: %v", err)
@@ -285,6 +327,7 @@ func TestValidate_MultiTenantWithJWT(t *testing.T) {
 			{ID: "acme", Issuer: config.TenantIssuerConfig{Scope: "s"}},
 			{ID: "gov", Policy: config.TenantPolicyConfig{}, Issuer: config.TenantIssuerConfig{Scope: "s2"}},
 		},
+		Trust: prodTrust(),
 	}
 	if err := cfg.Validate(); err != nil {
 		t.Errorf("unexpected error: %v", err)
@@ -296,6 +339,7 @@ func TestValidate_OK(t *testing.T) {
 		FaceTec: config.FaceTecConfig{ServerURL: "https://x", DeviceKey: "k"},
 		Issuer:  config.IssuerConfig{Addr: "x", Scope: "s"},
 		JWT:     config.JWTConfig{Secret: "shared-secret"},
+		Trust:   prodTrust(),
 	}
 	if err := cfg.Validate(); err != nil {
 		t.Errorf("unexpected error: %v", err)
@@ -307,6 +351,7 @@ func TestValidate_WithAppKey(t *testing.T) {
 		FaceTec:  config.FaceTecConfig{ServerURL: "https://x", DeviceKey: "k"},
 		Issuer:   config.IssuerConfig{Addr: "x", Scope: "s"},
 		Security: config.SecurityConfig{AppKey: "secret"},
+		Trust:    prodTrust(),
 	}
 	if err := cfg.Validate(); err != nil {
 		t.Errorf("unexpected error: %v", err)
@@ -380,12 +425,14 @@ func validBase() *config.Config {
 		FaceTec: config.FaceTecConfig{ServerURL: "https://x"},
 		Issuer:  config.IssuerConfig{Addr: "x", Scope: "s"},
 		JWT:     config.JWTConfig{Secret: "shared-secret"},
+		Trust:   prodTrust(),
 	}
 }
 
 func TestValidate_TrustRequiredNeedsPDP(t *testing.T) {
 	cfg := validBase()
 	cfg.Trust.Required = true
+	cfg.Trust.PDPURL = "" // stated here rather than inherited from validBase()
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("trust.required without trust.pdp_url must refuse, not skip")
 	}
@@ -395,9 +442,17 @@ func TestValidate_TrustRequiredNeedsPDP(t *testing.T) {
 	}
 }
 
+// trust.required: false needs no PDP -- that is the point of the development
+// opt-out. Since #85 a production build refuses the setting outright, so this
+// property only holds on a development build; the production side is pinned by
+// TestValidate_TrustRequiredOptOut.
 func TestValidate_TrustNotRequiredAllowsNoPDP(t *testing.T) {
+	if buildmode.Production() {
+		t.Skip("a production build refuses trust.required: false (#85)")
+	}
 	cfg := validBase()
 	cfg.Trust.Required = false
+	cfg.Trust.PDPURL = ""
 	if err := cfg.Validate(); err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
@@ -471,6 +526,7 @@ func TestValidate_MinChipFaceMatchLevel(t *testing.T) {
 			FaceTec: config.FaceTecConfig{ServerURL: "https://x", MinChipFaceMatchLevel: tc.level},
 			Issuer:  config.IssuerConfig{Addr: "x", Scope: "s"},
 			JWT:     config.JWTConfig{Secret: "shared-secret"},
+			Trust:   prodTrust(),
 		}
 		if err := cfg.Validate(); (err == nil) != tc.ok {
 			t.Errorf("min_chip_face_match_level %d: Validate() = %v, want ok=%v", tc.level, err, tc.ok)

@@ -4,6 +4,14 @@
 
 Accepted
 
+Amended 2026-10-28 (issue #85): `trust.required` now applies to every document type, not
+passports only, and a second gate refuses issuance unless the credential's identity came from a
+verified, trusted chip (`chip_data_unverified`). ID cards are ICAO 9303 documents signed under the
+same CSCAs, so the passport-only scope meant issuing an ID card credential from a signer nobody
+vouched for. ISO 18013 driving licences are refused until their chips and trust lists are
+supported — the accepted cost. `trust.required: false` remains a development opt-out and is now
+refused outright by a production build (`-tags production`).
+
 ## Context
 
 Passport chips (ICAO 9303 eMRTD) carry an EF.SOD, a CMS signature by a Document Signer

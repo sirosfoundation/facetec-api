@@ -1,7 +1,7 @@
 // Package integration contains end-to-end HTTP tests for the facetec-api service.
 // They test the full HTTP transport layer — routing, authentication, rate limiting,
 // and request/response serialisation — using a stub implementation of the Apiv1
-// interface in place of real FaceTec or gRPC backends.
+// interface in place of real FaceTec or issuer backends.
 package integration
 
 import (
