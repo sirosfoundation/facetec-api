@@ -180,6 +180,19 @@ func TestLoad_AppKeyPathError(t *testing.T) {
 
 // ── Validate tests ────────────────────────────────────────────────────────────
 
+// jwtAuth returns a complete JWT configuration. go-tokenauth refuses to
+// validate a token without an audience restriction or an expected issuer
+// rather than skipping those checks, so Validate requires both whenever
+// jwt.jwks_uri or jwt.secret is set. Pass "" for the mode not under test.
+func jwtAuth(jwksURI, secret string) config.JWTConfig {
+	return config.JWTConfig{
+		JWKSURI:  jwksURI,
+		Secret:   secret,
+		Issuer:   "https://as.example.org",
+		Audience: []string{"facetec-api"},
+	}
+}
+
 // prodTrust is the trust configuration a real deployment gets from
 // defaultConfig(): required, with a PDP. Tests that build a Config literal
 // bypass defaultConfig(), so Trust.Required would be the Go zero value
@@ -213,7 +226,7 @@ func TestValidate_IncludePIIRequiresDebugLevel(t *testing.T) {
 	cfg := &config.Config{
 		FaceTec: config.FaceTecConfig{ServerURL: "https://x"},
 		Issuer:  config.IssuerConfig{Addr: "x", Scope: "s"},
-		JWT:     config.JWTConfig{Secret: "shared-secret"},
+		JWT:     jwtAuth("", "shared-secret"),
 		Logging: config.LoggingConfig{Level: "debug", IncludePII: true},
 		Trust:   prodTrust(),
 	}
@@ -229,7 +242,7 @@ func TestValidate_JWKSURI(t *testing.T) {
 		return &config.Config{
 			FaceTec: config.FaceTecConfig{ServerURL: "https://x"},
 			Issuer:  config.IssuerConfig{Addr: "https://x", Scope: "s"},
-			JWT:     config.JWTConfig{JWKSURI: uri, Secret: "shared-secret"},
+			JWT:     jwtAuth(uri, "shared-secret"),
 			Trust:   prodTrust(),
 		}
 	}
@@ -265,12 +278,55 @@ func TestValidate_JWKSURI(t *testing.T) {
 	}
 }
 
+// TestValidate_JWTRequiresAudienceAndIssuer pins that a JWT configuration
+// missing either key fails at startup. go-tokenauth refuses to validate
+// without them, so without this check the service would start happily and
+// then reject every single request -- and the reason would only be visible at
+// debug level, per request.
+func TestValidate_JWTRequiresAudienceAndIssuer(t *testing.T) {
+	base := func(jwtCfg config.JWTConfig) *config.Config {
+		return &config.Config{
+			FaceTec: config.FaceTecConfig{ServerURL: "https://x"},
+			Issuer:  config.IssuerConfig{Addr: "https://x", Scope: "s"},
+			JWT:     jwtCfg,
+			Trust:   prodTrust(),
+		}
+	}
+
+	for name, jwtCfg := range map[string]config.JWTConfig{
+		"secret_without_audience":   {Secret: "s", Issuer: "https://as.example.org"},
+		"secret_without_issuer":     {Secret: "s", Audience: []string{"facetec-api"}},
+		"secret_without_either":     {Secret: "s"},
+		"jwks_uri_without_audience": {JWKSURI: "https://as.example.org/jwks.json", Issuer: "https://as.example.org"},
+		"jwks_uri_without_issuer":   {JWKSURI: "https://as.example.org/jwks.json", Audience: []string{"facetec-api"}},
+		"empty_audience_list":       {Secret: "s", Issuer: "https://as.example.org", Audience: []string{}},
+	} {
+		t.Run("rejects/"+name, func(t *testing.T) {
+			if err := base(jwtCfg).Validate(); err == nil {
+				t.Error("expected an error")
+			}
+		})
+	}
+
+	// The requirement is scoped to JWT mode: the legacy app-key path has no
+	// token to carry an audience and must stay configurable without one.
+	appKeyOnly := &config.Config{
+		FaceTec:  config.FaceTecConfig{ServerURL: "https://x"},
+		Issuer:   config.IssuerConfig{Addr: "https://x", Scope: "s"},
+		Security: config.SecurityConfig{AppKey: "legacy-key"},
+		Trust:    prodTrust(),
+	}
+	if err := appKeyOnly.Validate(); err != nil {
+		t.Errorf("security.app_key alone should still validate: %v", err)
+	}
+}
+
 func TestValidate_LogFormat(t *testing.T) {
 	valid := func(format string) *config.Config {
 		return &config.Config{
 			FaceTec: config.FaceTecConfig{ServerURL: "https://x"},
 			Issuer:  config.IssuerConfig{Addr: "https://x", Scope: "s"},
-			JWT:     config.JWTConfig{Secret: "shared-secret"},
+			JWT:     jwtAuth("", "shared-secret"),
 			Logging: config.LoggingConfig{Format: format},
 			// Without this the production build refuses the config for a
 			// reason that has nothing to do with logging.format (#85).
@@ -304,7 +360,7 @@ func TestValidate_JWKSURISatisfiesAuthRequirement(t *testing.T) {
 	single := &config.Config{
 		FaceTec: config.FaceTecConfig{ServerURL: "https://x"},
 		Issuer:  config.IssuerConfig{Addr: "https://x", Scope: "s"},
-		JWT:     config.JWTConfig{JWKSURI: "https://backend.example.org/jwks.json"},
+		JWT:     jwtAuth("https://backend.example.org/jwks.json", ""),
 		Trust:   prodTrust(),
 	}
 	if err := single.Validate(); err != nil {
@@ -314,7 +370,7 @@ func TestValidate_JWKSURISatisfiesAuthRequirement(t *testing.T) {
 	multi := &config.Config{
 		FaceTec: config.FaceTecConfig{ServerURL: "https://x"},
 		Issuer:  config.IssuerConfig{Addr: "https://x", Scope: "s"},
-		JWT:     config.JWTConfig{JWKSURI: "https://backend.example.org/jwks.json"},
+		JWT:     jwtAuth("https://backend.example.org/jwks.json", ""),
 		Tenants: []config.TenantConfig{{ID: "t-1"}},
 		Trust:   prodTrust(),
 	}
@@ -336,7 +392,7 @@ func TestValidate_WithoutDeviceKey(t *testing.T) {
 	cfg := &config.Config{
 		FaceTec: config.FaceTecConfig{ServerURL: "https://x"},
 		Issuer:  config.IssuerConfig{Addr: "x", Scope: "s"},
-		JWT:     config.JWTConfig{Secret: "shared-secret"},
+		JWT:     jwtAuth("", "shared-secret"),
 		Trust:   prodTrust(),
 	}
 	if err := cfg.Validate(); err != nil {
@@ -378,7 +434,7 @@ func TestValidate_WithJWTSecret(t *testing.T) {
 	cfg := &config.Config{
 		FaceTec: config.FaceTecConfig{ServerURL: "https://x", DeviceKey: "k"},
 		Issuer:  config.IssuerConfig{Addr: "x", Scope: "s"},
-		JWT:     config.JWTConfig{Secret: "shared-secret"},
+		JWT:     jwtAuth("", "shared-secret"),
 		Trust:   prodTrust(),
 	}
 	if err := cfg.Validate(); err != nil {
@@ -403,7 +459,7 @@ func TestValidate_MultiTenantWithJWT(t *testing.T) {
 	cfg := &config.Config{
 		FaceTec: config.FaceTecConfig{ServerURL: "https://x", DeviceKey: "k"},
 		Issuer:  config.IssuerConfig{Addr: "x", Scope: "s"},
-		JWT:     config.JWTConfig{Secret: "shared-secret", Issuer: "https://auth.example.org"},
+		JWT:     config.JWTConfig{Secret: "shared-secret", Issuer: "https://auth.example.org", Audience: []string{"facetec-api"}},
 		Tenants: []config.TenantConfig{
 			{ID: "acme", Issuer: config.TenantIssuerConfig{Scope: "s"}},
 			{ID: "gov", Policy: config.TenantPolicyConfig{}, Issuer: config.TenantIssuerConfig{Scope: "s2"}},
@@ -419,7 +475,7 @@ func TestValidate_OK(t *testing.T) {
 	cfg := &config.Config{
 		FaceTec: config.FaceTecConfig{ServerURL: "https://x", DeviceKey: "k"},
 		Issuer:  config.IssuerConfig{Addr: "x", Scope: "s"},
-		JWT:     config.JWTConfig{Secret: "shared-secret"},
+		JWT:     jwtAuth("", "shared-secret"),
 		Trust:   prodTrust(),
 	}
 	if err := cfg.Validate(); err != nil {
@@ -505,7 +561,7 @@ func validBase() *config.Config {
 	return &config.Config{
 		FaceTec: config.FaceTecConfig{ServerURL: "https://x"},
 		Issuer:  config.IssuerConfig{Addr: "x", Scope: "s"},
-		JWT:     config.JWTConfig{Secret: "shared-secret"},
+		JWT:     jwtAuth("", "shared-secret"),
 		Trust:   prodTrust(),
 	}
 }
@@ -606,7 +662,7 @@ func TestValidate_MinChipFaceMatchLevel(t *testing.T) {
 		cfg := &config.Config{
 			FaceTec: config.FaceTecConfig{ServerURL: "https://x", MinChipFaceMatchLevel: tc.level},
 			Issuer:  config.IssuerConfig{Addr: "x", Scope: "s"},
-			JWT:     config.JWTConfig{Secret: "shared-secret"},
+			JWT:     jwtAuth("", "shared-secret"),
 			Trust:   prodTrust(),
 		}
 		if err := cfg.Validate(); (err == nil) != tc.ok {

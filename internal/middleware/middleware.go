@@ -2,19 +2,18 @@
 package middleware
 
 import (
+	"context"
 	"crypto/subtle"
-	"fmt"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
-	jwt "github.com/golang-jwt/jwt/v5"
+	"github.com/sirosfoundation/go-tokenauth/validator"
 	"go.uber.org/zap"
 
 	"github.com/sirosfoundation/facetec-api/internal/config"
-	"github.com/sirosfoundation/facetec-api/internal/jwks"
 	"github.com/sirosfoundation/facetec-api/internal/tenant"
 )
 
@@ -42,25 +41,29 @@ func AppKeyAuth(cfg *config.SecurityConfig, log *zap.Logger) gin.HandlerFunc {
 //
 // Three modes, evaluated in order:
 //   - JWT mode (cfg.JWT.JWKSURI != "" or cfg.JWT.Secret != ""): validates a
-//     Bearer JWT and extracts the tenant_id claim to select the tenant. A
-//     missing or unknown tenant_id falls back to the "default" tenant, so
-//     deployments with a single policy need no per-request tenant_id at all.
-//     With jwks_uri, tokens are verified against the issuer's published public
-//     keys and this service holds nothing that can mint one; with secret, they
-//     are verified against a shared HMAC secret, which can. Both may be
-//     configured during the migration (#12).
+//     Bearer JWT with go-tokenauth and extracts the tenant_id claim to select
+//     the tenant. A missing or unknown tenant_id falls back to the "default"
+//     tenant, so deployments with a single policy need no per-request
+//     tenant_id at all. With jwks_uri, tokens are verified against the
+//     issuer's published public keys and this service holds nothing that can
+//     mint one; with secret, they are verified against a shared HMAC secret,
+//     which can. Both may be configured during the migration (#12).
 //   - Legacy mode (cfg.Security.AppKey != "", no JWT secret): constant-time
 //     comparison of the raw Bearer token against the global app key. All
 //     requests use the "default" tenant. Retained for backward compatibility
 //     with single-tenant deployments.
 //   - Dev mode (both empty): no authentication; the "default" tenant is always
 //     injected and a warning is logged once at construction time.
-func TenantAuth(registry *tenant.Registry, cfg *config.Config, log *zap.Logger) gin.HandlerFunc {
+//
+// The second return value stops the background JWKS refresh that JWT mode
+// starts; it is nil in the other two modes. Callers must invoke it during
+// shutdown, as they already do for [RateLimit], or leak a goroutine.
+func TenantAuth(registry *tenant.Registry, cfg *config.Config, log *zap.Logger) (gin.HandlerFunc, func()) {
 	switch {
 	case cfg.JWT.JWKSURI != "", cfg.JWT.Secret != "":
 		return jwtTenantAuth(registry, cfg.JWT, log)
 	case cfg.Security.AppKey != "":
-		return legacyBearerTenantAuth(registry, cfg.Security.AppKey, log)
+		return legacyBearerTenantAuth(registry, cfg.Security.AppKey, log), nil
 	default:
 		defTenant, _ := registry.Resolve("default")
 		log.Warn("SECURITY: authentication is DISABLED (no jwt.secret or security.app_key configured) — not suitable for production")
@@ -68,71 +71,55 @@ func TenantAuth(registry *tenant.Registry, cfg *config.Config, log *zap.Logger) 
 			tenant.SetGin(c, defTenant)
 			c.Request = c.Request.WithContext(tenant.WithStdContext(c.Request.Context(), defTenant))
 			c.Next()
-		}
+		}, nil
 	}
 }
 
-// jwtTenantAuth validates Bearer JWTs and resolves the tenant_id claim to a
-// [tenant.Context]. A missing or unconfigured tenant_id falls back to the
-// "default" tenant, so tokens without a tenant_id claim work correctly for
-// single-tenant deployments.
+// jwtTenantAuth validates Bearer JWTs with go-tokenauth and resolves the
+// tenant_id claim to a [tenant.Context]. A missing or unconfigured tenant_id
+// falls back to the "default" tenant, so tokens without a tenant_id claim work
+// correctly for single-tenant deployments.
 //
 // Signature verification is keyed on the algorithm family and nothing else:
-// an ECDSA or Ed25519 token is verified against a public key from the
-// issuer's key set, an HMAC token against the shared secret, and neither key
-// is ever offered to the other family. That separation is the whole mitigation
-// for algorithm confusion -- a token header claiming HS256 while carrying a
-// signature made with the issuer's published public key as the HMAC secret is
-// the classic attack, and it fails here because the HMAC branch never sees a
-// JWKS key. A family with no key configured is refused outright rather than
-// falling through.
-func jwtTenantAuth(registry *tenant.Registry, jwtCfg config.JWTConfig, log *zap.Logger) gin.HandlerFunc {
-	secret := []byte(jwtCfg.Secret)
+// go-tokenauth routes an ES256/ES384/EdDSA token to a public key from the
+// issuer's key set and an HS256/HS384/HS512 token to the shared secret, and
+// neither key is ever offered to the other family. That separation is the
+// whole mitigation for algorithm confusion -- a token header claiming HS256
+// while carrying a signature made with the issuer's published public key as
+// the HMAC secret is the classic attack, and it fails because the HMAC path
+// never sees a JWKS key. A family with no key configured is refused outright
+// rather than falling through: with jwks_uri alone, legacy HMAC validation is
+// switched off entirely.
+//
+// Returns a stop function for the validator's background key refresh.
+func jwtTenantAuth(registry *tenant.Registry, jwtCfg config.JWTConfig, log *zap.Logger) (gin.HandlerFunc, func()) {
+	v := validator.New(validator.Config{
+		JWKSURL:     jwtCfg.JWKSURI,
+		JWKSRefresh: jwtCfg.JWKSRefresh,
+		Issuer:      jwtCfg.Issuer,
+		Audiences:   jwtCfg.Audience,
+		Legacy: validator.LegacyConfig{
+			// Only enabled when a secret is actually configured, so a
+			// deployment that has finished the migration refuses every HS*
+			// token outright instead of reporting a key mismatch.
+			Enabled:    jwtCfg.Secret != "",
+			HMACSecret: []byte(jwtCfg.Secret),
+			Issuers:    []string{jwtCfg.Issuer},
+		},
+	})
+	v.Start(context.Background())
 
-	methods := make([]string, 0, 6)
-	if jwtCfg.JWKSURI != "" {
-		for _, alg := range jwks.Algorithms {
-			methods = append(methods, string(alg))
-		}
-	}
-	if jwtCfg.Secret != "" {
-		methods = append(methods, "HS256", "HS384", "HS512")
-	}
-
-	var verifier *jwks.Verifier
-	if jwtCfg.JWKSURI != "" {
-		timeout := jwtCfg.JWKSTimeout
-		if timeout == 0 {
-			timeout = 5 * time.Second
-		}
-		v, err := jwks.New(jwks.Config{
-			URI:        jwtCfg.JWKSURI,
-			HTTPClient: &http.Client{Timeout: timeout},
-			CacheTTL:   jwtCfg.JWKSCacheTTL,
-		})
-		if err != nil {
-			// Validate has already checked the URI, so this is not reachable
-			// from a loaded config; refuse every request rather than start up
-			// accepting tokens no one verified.
-			log.Error("SECURITY: JWKS verifier could not be built; JWT authentication will refuse every request", zap.Error(err))
-		} else {
-			verifier = v
-			log.Info("verifying Bearer JWTs against the issuer's key set", zap.String("jwks_uri", jwtCfg.JWKSURI))
-		}
-	}
-	if jwtCfg.Secret != "" {
-		if verifier != nil {
-			log.Warn("jwt.secret is still configured alongside jwt.jwks_uri: HMAC-signed tokens remain accepted. Remove jwt.secret to finish the migration")
-		} else {
-			log.Info("verifying Bearer JWTs against the shared HMAC secret (jwt.secret); prefer jwt.jwks_uri")
-		}
+	switch {
+	case jwtCfg.JWKSURI != "" && jwtCfg.Secret != "":
+		log.Warn("jwt.secret is still configured alongside jwt.jwks_uri: HMAC-signed tokens remain accepted. Remove jwt.secret to finish the migration",
+			zap.String("jwks_uri", jwtCfg.JWKSURI))
+	case jwtCfg.JWKSURI != "":
+		log.Info("verifying Bearer JWTs against the issuer's key set", zap.String("jwks_uri", jwtCfg.JWKSURI))
+	default:
+		log.Info("verifying Bearer JWTs against the shared HMAC secret (jwt.secret); prefer jwt.jwks_uri")
 	}
 
-	opts := []jwt.ParserOption{jwt.WithValidMethods(methods)}
-	if jwtCfg.Issuer != "" {
-		opts = append(opts, jwt.WithIssuer(jwtCfg.Issuer))
-	}
-	return func(c *gin.Context) {
+	handler := func(c *gin.Context) {
 		h := c.GetHeader("Authorization")
 		if !strings.HasPrefix(h, "Bearer ") {
 			if !jwtCfg.RequireAuth {
@@ -144,40 +131,22 @@ func jwtTenantAuth(registry *tenant.Registry, jwtCfg config.JWTConfig, log *zap.
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 			return
 		}
-		tokenStr := strings.TrimPrefix(h, "Bearer ")
-		token, err := jwt.Parse(tokenStr, func(t *jwt.Token) (interface{}, error) {
-			switch t.Method.(type) {
-			case *jwt.SigningMethodECDSA, *jwt.SigningMethodEd25519:
-				if verifier == nil {
-					return nil, fmt.Errorf("no key set configured for signing method %v", t.Header["alg"])
-				}
-				kid, _ := t.Header["kid"].(string)
-				return verifier.KeyFor(c.Request.Context(), kid)
-			case *jwt.SigningMethodHMAC:
-				if len(secret) == 0 {
-					return nil, fmt.Errorf("no shared secret configured for signing method %v", t.Header["alg"])
-				}
-				return secret, nil
-			default:
-				return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
-			}
-		}, opts...)
-		if err != nil || !token.Valid {
+		result, err := v.Validate(c.Request.Context(), strings.TrimPrefix(h, "Bearer "))
+		if err != nil {
 			log.Debug("JWT validation failed", zap.Error(err))
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 			return
 		}
-		tenantID := "default"
-		if claims, ok := token.Claims.(jwt.MapClaims); ok {
-			if id, ok := claims["tenant_id"].(string); ok && id != "" {
-				tenantID = id
-			}
+		tenantID := result.TenantID
+		if tenantID == "" {
+			tenantID = "default"
 		}
 		if !injectTenant(c, registry, tenantID, log) {
 			return
 		}
 		c.Next()
 	}
+	return handler, v.Stop
 }
 
 // legacyBearerTenantAuth performs a constant-time comparison of the raw Bearer

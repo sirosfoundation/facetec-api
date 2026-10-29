@@ -20,7 +20,7 @@ func TestValidate_TrustRequiredOptOut(t *testing.T) {
 	cfg := &config.Config{
 		FaceTec: config.FaceTecConfig{ServerURL: "https://x"},
 		Issuer:  config.IssuerConfig{Addr: "https://x", Scope: "s"},
-		JWT:     config.JWTConfig{Secret: "shared-secret"},
+		JWT:     jwtAuth("", "shared-secret"),
 		Trust:   config.TrustConfig{Required: false},
 	}
 
@@ -47,7 +47,7 @@ func TestValidate_TrustRequiredTrueIsAcceptedEverywhere(t *testing.T) {
 	cfg := &config.Config{
 		FaceTec: config.FaceTecConfig{ServerURL: "https://x"},
 		Issuer:  config.IssuerConfig{Addr: "https://x", Scope: "s"},
-		JWT:     config.JWTConfig{Secret: "shared-secret"},
+		JWT:     jwtAuth("", "shared-secret"),
 		Trust:   config.TrustConfig{Required: true, PDPURL: "https://go-trust.example.org"},
 	}
 	if err := cfg.Validate(); err != nil {

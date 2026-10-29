@@ -36,6 +36,25 @@ func newRouter(mw gin.HandlerFunc) *gin.Engine {
 	return r
 }
 
+// Every JWT configuration below sets both, because go-tokenauth refuses to
+// validate a token without an audience restriction and an expected issuer
+// rather than skipping those checks.
+const (
+	testIssuer   = "https://as.example.org"
+	testAudience = "facetec-api"
+)
+
+// authRouter wires TenantAuth in front of GET /test and stops the validator's
+// background key refresh when the test ends.
+func authRouter(t *testing.T, reg *tenant.Registry, cfg *config.Config) *gin.Engine {
+	t.Helper()
+	mw, stop := middleware.TenantAuth(reg, cfg, zap.NewNop())
+	if stop != nil {
+		t.Cleanup(stop)
+	}
+	return newRouter(mw)
+}
+
 // get performs a GET /test request through r and returns the response recorder.
 func get(r *gin.Engine, header ...string) *httptest.ResponseRecorder {
 	w := httptest.NewRecorder()
@@ -205,9 +224,11 @@ func makeJWT(t *testing.T, secret, issuer, tenantID string) string {
 	t.Helper()
 	claims := jwtlib.MapClaims{
 		"exp": time.Now().Add(time.Hour).Unix(),
+		"aud": testAudience,
 	}
-	if issuer != "" {
-		claims["iss"] = issuer
+	claims["iss"] = issuer
+	if issuer == "" {
+		claims["iss"] = testIssuer
 	}
 	if tenantID != "" {
 		claims["tenant_id"] = tenantID
@@ -224,7 +245,7 @@ func makeJWT(t *testing.T, secret, issuer, tenantID string) string {
 func TestTenantAuth_DevModePassThrough(t *testing.T) {
 	reg := buildTestRegistry(t)
 	cfg := &config.Config{} // no JWT.Secret, no Security.AppKey
-	r := newRouter(middleware.TenantAuth(reg, cfg, zap.NewNop()))
+	r := authRouter(t, reg, cfg)
 	if w := get(r); w.Code != http.StatusOK {
 		t.Errorf("expected 200 (dev mode), got %d", w.Code)
 	}
@@ -234,7 +255,7 @@ func TestTenantAuth_DevModePassThrough(t *testing.T) {
 func TestTenantAuth_LegacyMode_CorrectKey(t *testing.T) {
 	reg := buildTestRegistry(t)
 	cfg := &config.Config{Security: config.SecurityConfig{AppKey: "s3cr3t"}}
-	r := newRouter(middleware.TenantAuth(reg, cfg, zap.NewNop()))
+	r := authRouter(t, reg, cfg)
 	if w := get(r, "Authorization", "Bearer s3cr3t"); w.Code != http.StatusOK {
 		t.Errorf("expected 200, got %d", w.Code)
 	}
@@ -243,7 +264,7 @@ func TestTenantAuth_LegacyMode_CorrectKey(t *testing.T) {
 func TestTenantAuth_LegacyMode_WrongKey(t *testing.T) {
 	reg := buildTestRegistry(t)
 	cfg := &config.Config{Security: config.SecurityConfig{AppKey: "s3cr3t"}}
-	r := newRouter(middleware.TenantAuth(reg, cfg, zap.NewNop()))
+	r := authRouter(t, reg, cfg)
 	if w := get(r, "Authorization", "Bearer wrong"); w.Code != http.StatusUnauthorized {
 		t.Errorf("expected 401, got %d", w.Code)
 	}
@@ -252,7 +273,7 @@ func TestTenantAuth_LegacyMode_WrongKey(t *testing.T) {
 func TestTenantAuth_LegacyMode_MissingHeader(t *testing.T) {
 	reg := buildTestRegistry(t)
 	cfg := &config.Config{Security: config.SecurityConfig{AppKey: "s3cr3t"}}
-	r := newRouter(middleware.TenantAuth(reg, cfg, zap.NewNop()))
+	r := authRouter(t, reg, cfg)
 	if w := get(r); w.Code != http.StatusUnauthorized {
 		t.Errorf("expected 401, got %d", w.Code)
 	}
@@ -261,8 +282,8 @@ func TestTenantAuth_LegacyMode_MissingHeader(t *testing.T) {
 // TestTenantAuth_JWT_ValidToken verifies a correctly signed JWT grants access.
 func TestTenantAuth_JWT_ValidToken(t *testing.T) {
 	reg := buildTestRegistry(t)
-	cfg := &config.Config{JWT: config.JWTConfig{Secret: "test-secret", RequireAuth: true}}
-	r := newRouter(middleware.TenantAuth(reg, cfg, zap.NewNop()))
+	cfg := &config.Config{JWT: config.JWTConfig{Secret: "test-secret", Issuer: testIssuer, Audience: []string{testAudience}, RequireAuth: true}}
+	r := authRouter(t, reg, cfg)
 	tok := makeJWT(t, "test-secret", "", "")
 	if w := get(r, "Authorization", "Bearer "+tok); w.Code != http.StatusOK {
 		t.Errorf("expected 200, got %d", w.Code)
@@ -272,8 +293,8 @@ func TestTenantAuth_JWT_ValidToken(t *testing.T) {
 // TestTenantAuth_JWT_InvalidToken verifies a tampered JWT is rejected.
 func TestTenantAuth_JWT_InvalidToken(t *testing.T) {
 	reg := buildTestRegistry(t)
-	cfg := &config.Config{JWT: config.JWTConfig{Secret: "test-secret", RequireAuth: true}}
-	r := newRouter(middleware.TenantAuth(reg, cfg, zap.NewNop()))
+	cfg := &config.Config{JWT: config.JWTConfig{Secret: "test-secret", Issuer: testIssuer, Audience: []string{testAudience}, RequireAuth: true}}
+	r := authRouter(t, reg, cfg)
 	if w := get(r, "Authorization", "Bearer invalid.jwt.token"); w.Code != http.StatusUnauthorized {
 		t.Errorf("expected 401, got %d", w.Code)
 	}
@@ -282,8 +303,8 @@ func TestTenantAuth_JWT_InvalidToken(t *testing.T) {
 // TestTenantAuth_JWT_WrongSecret verifies a JWT signed with a different secret is rejected.
 func TestTenantAuth_JWT_WrongSecret(t *testing.T) {
 	reg := buildTestRegistry(t)
-	cfg := &config.Config{JWT: config.JWTConfig{Secret: "correct-secret", RequireAuth: true}}
-	r := newRouter(middleware.TenantAuth(reg, cfg, zap.NewNop()))
+	cfg := &config.Config{JWT: config.JWTConfig{Secret: "correct-secret", Issuer: testIssuer, Audience: []string{testAudience}, RequireAuth: true}}
+	r := authRouter(t, reg, cfg)
 	tok := makeJWT(t, "wrong-secret", "", "")
 	if w := get(r, "Authorization", "Bearer "+tok); w.Code != http.StatusUnauthorized {
 		t.Errorf("expected 401, got %d", w.Code)
@@ -296,9 +317,10 @@ func TestTenantAuth_JWT_WrongIssuer(t *testing.T) {
 	cfg := &config.Config{JWT: config.JWTConfig{
 		Secret:      "test-secret",
 		Issuer:      "https://expected.example.org",
+		Audience:    []string{testAudience},
 		RequireAuth: true,
 	}}
-	r := newRouter(middleware.TenantAuth(reg, cfg, zap.NewNop()))
+	r := authRouter(t, reg, cfg)
 	tok := makeJWT(t, "test-secret", "https://wrong.example.org", "")
 	if w := get(r, "Authorization", "Bearer "+tok); w.Code != http.StatusUnauthorized {
 		t.Errorf("expected 401, got %d", w.Code)
@@ -309,8 +331,8 @@ func TestTenantAuth_JWT_WrongIssuer(t *testing.T) {
 // the default tenant when require_auth is false.
 func TestTenantAuth_JWT_NoRequireAuth_NoToken(t *testing.T) {
 	reg := buildTestRegistry(t)
-	cfg := &config.Config{JWT: config.JWTConfig{Secret: "test-secret", RequireAuth: false}}
-	r := newRouter(middleware.TenantAuth(reg, cfg, zap.NewNop()))
+	cfg := &config.Config{JWT: config.JWTConfig{Secret: "test-secret", Issuer: testIssuer, Audience: []string{testAudience}, RequireAuth: false}}
+	r := authRouter(t, reg, cfg)
 	if w := get(r); w.Code != http.StatusOK {
 		t.Errorf("expected 200 (default tenant fallback), got %d", w.Code)
 	}
@@ -321,8 +343,8 @@ func TestTenantAuth_JWT_NoRequireAuth_NoToken(t *testing.T) {
 // returning 401 — crucial for the "most tenants use default settings" use-case.
 func TestTenantAuth_JWT_UnknownTenantFallsBackToDefault(t *testing.T) {
 	reg := buildTestRegistry(t)
-	cfg := &config.Config{JWT: config.JWTConfig{Secret: "test-secret", RequireAuth: true}}
-	r := newRouter(middleware.TenantAuth(reg, cfg, zap.NewNop()))
+	cfg := &config.Config{JWT: config.JWTConfig{Secret: "test-secret", Issuer: testIssuer, Audience: []string{testAudience}, RequireAuth: true}}
+	r := authRouter(t, reg, cfg)
 	tok := makeJWT(t, "test-secret", "", "unknown-tenant-xyz")
 	if w := get(r, "Authorization", "Bearer "+tok); w.Code != http.StatusOK {
 		t.Errorf("expected 200 (fallback to default), got %d", w.Code)
@@ -332,8 +354,8 @@ func TestTenantAuth_JWT_UnknownTenantFallsBackToDefault(t *testing.T) {
 // TestTenantAuth_JWT_MissingHeaderRequireAuth verifies 401 when header absent and require_auth=true.
 func TestTenantAuth_JWT_MissingHeaderRequireAuth(t *testing.T) {
 	reg := buildTestRegistry(t)
-	cfg := &config.Config{JWT: config.JWTConfig{Secret: "test-secret", RequireAuth: true}}
-	r := newRouter(middleware.TenantAuth(reg, cfg, zap.NewNop()))
+	cfg := &config.Config{JWT: config.JWTConfig{Secret: "test-secret", Issuer: testIssuer, Audience: []string{testAudience}, RequireAuth: true}}
+	r := authRouter(t, reg, cfg)
 	if w := get(r); w.Code != http.StatusUnauthorized {
 		t.Errorf("expected 401, got %d", w.Code)
 	}
@@ -460,7 +482,11 @@ func newES256Key(t *testing.T) *ecdsa.PrivateKey {
 // makeES256JWT signs claims with key, putting kid in the header.
 func makeES256JWT(t *testing.T, key *ecdsa.PrivateKey, kid, tenantID string) string {
 	t.Helper()
-	claims := jwtlib.MapClaims{"exp": time.Now().Add(time.Hour).Unix()}
+	claims := jwtlib.MapClaims{
+		"exp": time.Now().Add(time.Hour).Unix(),
+		"iss": testIssuer,
+		"aud": testAudience,
+	}
 	if tenantID != "" {
 		claims["tenant_id"] = tenantID
 	}
@@ -480,8 +506,8 @@ func TestTenantAuth_JWKS_AcceptsES256(t *testing.T) {
 	srv := jwksServer(t, "kid-1", key.Public(), nil)
 
 	reg := buildTestRegistry(t)
-	cfg := &config.Config{JWT: config.JWTConfig{JWKSURI: srv.URL, RequireAuth: true}}
-	r := newRouter(middleware.TenantAuth(reg, cfg, zap.NewNop()))
+	cfg := &config.Config{JWT: config.JWTConfig{JWKSURI: srv.URL, Issuer: testIssuer, Audience: []string{testAudience}, RequireAuth: true}}
+	r := authRouter(t, reg, cfg)
 
 	token := makeES256JWT(t, key, "kid-1", "")
 	if w := get(r, "Authorization", "Bearer "+token); w.Code != http.StatusOK {
@@ -493,8 +519,8 @@ func TestTenantAuth_JWKS_RejectsOtherKey(t *testing.T) {
 	srv := jwksServer(t, "kid-1", newES256Key(t).Public(), nil)
 
 	reg := buildTestRegistry(t)
-	cfg := &config.Config{JWT: config.JWTConfig{JWKSURI: srv.URL, RequireAuth: true}}
-	r := newRouter(middleware.TenantAuth(reg, cfg, zap.NewNop()))
+	cfg := &config.Config{JWT: config.JWTConfig{JWKSURI: srv.URL, Issuer: testIssuer, Audience: []string{testAudience}, RequireAuth: true}}
+	r := authRouter(t, reg, cfg)
 
 	// Signed by a key the issuer never published, but presenting a kid it did.
 	token := makeES256JWT(t, newES256Key(t), "kid-1", "")
@@ -508,8 +534,8 @@ func TestTenantAuth_JWKS_RejectsUnknownKid(t *testing.T) {
 	srv := jwksServer(t, "kid-1", key.Public(), nil)
 
 	reg := buildTestRegistry(t)
-	cfg := &config.Config{JWT: config.JWTConfig{JWKSURI: srv.URL, RequireAuth: true}}
-	r := newRouter(middleware.TenantAuth(reg, cfg, zap.NewNop()))
+	cfg := &config.Config{JWT: config.JWTConfig{JWKSURI: srv.URL, Issuer: testIssuer, Audience: []string{testAudience}, RequireAuth: true}}
+	r := authRouter(t, reg, cfg)
 
 	token := makeES256JWT(t, key, "kid-does-not-exist", "")
 	if w := get(r, "Authorization", "Bearer "+token); w.Code != http.StatusUnauthorized {
@@ -522,18 +548,18 @@ func TestTenantAuth_JWKS_RejectsUnknownKid(t *testing.T) {
 // issuer's PUBLIC key -- published, by design, at the JWKS endpoint -- and uses
 // it as an HMAC secret to sign a token whose header says HS256.
 //
-// Here the refusal comes from WithValidMethods, which lists no HS* algorithm
-// when no secret is configured, so the token never reaches the keyfunc. The
-// keyfunc's own family switch is covered by
-// TestTenantAuth_DualValidation_RejectsHMACSignedWithThePublicKey, which is
-// the configuration where a forged HS256 token does reach it.
+// Here the refusal comes from go-tokenauth having no legacy HMAC mode enabled
+// at all: jwtTenantAuth sets Legacy.Enabled only when jwt.secret is
+// configured, so an HS* header is turned away before any key is consulted.
+// The case where a forged HS256 token does reach a key lookup is
+// TestTenantAuth_DualValidation_RejectsHMACSignedWithThePublicKey.
 func TestTenantAuth_JWKS_RejectsHMACSignedWithThePublicKey(t *testing.T) {
 	key := newES256Key(t)
 	srv := jwksServer(t, "kid-1", key.Public(), nil)
 
 	reg := buildTestRegistry(t)
-	cfg := &config.Config{JWT: config.JWTConfig{JWKSURI: srv.URL, RequireAuth: true}}
-	r := newRouter(middleware.TenantAuth(reg, cfg, zap.NewNop()))
+	cfg := &config.Config{JWT: config.JWTConfig{JWKSURI: srv.URL, Issuer: testIssuer, Audience: []string{testAudience}, RequireAuth: true}}
+	r := authRouter(t, reg, cfg)
 
 	// The published public key, in the form an attacker would read it from the
 	// JWKS endpoint, used as an HMAC secret.
@@ -562,17 +588,19 @@ func TestTenantAuth_JWKS_RejectsHMACSignedWithThePublicKey(t *testing.T) {
 	}
 }
 
-// TestTenantAuth_DualValidation_RejectsHMACSignedWithThePublicKey is the test
-// that actually exercises the keyfunc's family switch.
+// TestTenantAuth_DualValidation_RejectsHMACSignedWithThePublicKey is the case
+// where a forged HS256 token does reach a key lookup.
 //
-// With only a key set configured, WithValidMethods does not list HS* at all, so
-// an HS256 token is refused before the keyfunc runs -- which is why
-// TestTenantAuth_JWKS_RejectsHMACSignedWithThePublicKey above still passes if
-// the family switch is removed. In the dual-validation window both families are
-// listed, the forged token reaches the keyfunc, and only the switch on
-// t.Method stands between the issuer's published public key and its use as an
-// HMAC secret. Verified by mutation: make the HMAC branch return the JWKS key's
-// DER bytes and this test fails while that one does not.
+// With only a key set configured, legacy HMAC validation is off, so an HS256
+// token is turned away on the header alone. In the dual-validation window both
+// families are live, so the forged token reaches go-tokenauth's dispatch and
+// what stops it is that the HS* branch is wired to the configured shared
+// secret and nothing else -- the published public key the attacker signed with
+// is only ever reachable from the ES*/EdDSA branch.
+//
+// This is a regression test on the dependency rather than on code in this
+// repo: it is what should fail if a future go-tokenauth were to let the two
+// key sources cross.
 func TestTenantAuth_DualValidation_RejectsHMACSignedWithThePublicKey(t *testing.T) {
 	key := newES256Key(t)
 	srv := jwksServer(t, "kid-1", key.Public(), nil)
@@ -581,9 +609,11 @@ func TestTenantAuth_DualValidation_RejectsHMACSignedWithThePublicKey(t *testing.
 	cfg := &config.Config{JWT: config.JWTConfig{
 		JWKSURI:     srv.URL,
 		Secret:      "shared-secret",
+		Issuer:      testIssuer,
+		Audience:    []string{testAudience},
 		RequireAuth: true,
 	}}
-	r := newRouter(middleware.TenantAuth(reg, cfg, zap.NewNop()))
+	r := authRouter(t, reg, cfg)
 
 	pubDER, err := x509.MarshalPKIXPublicKey(key.Public())
 	if err != nil {
@@ -614,14 +644,62 @@ func TestTenantAuth_DualValidation_RejectsHMACSignedWithThePublicKey(t *testing.
 	}
 }
 
+// TestTenantAuth_RejectsForeignAudience pins the audience binding that comes
+// with go-tokenauth. The estate shares one issuer, so without this a token
+// minted for any other service -- correctly signed, unexpired, right issuer --
+// could be replayed here.
+func TestTenantAuth_RejectsForeignAudience(t *testing.T) {
+	key := newES256Key(t)
+	srv := jwksServer(t, "kid-1", key.Public(), nil)
+
+	reg := buildTestRegistry(t)
+	cfg := &config.Config{JWT: config.JWTConfig{
+		JWKSURI:     srv.URL,
+		Secret:      "shared-secret",
+		Issuer:      testIssuer,
+		Audience:    []string{testAudience},
+		RequireAuth: true,
+	}}
+	r := authRouter(t, reg, cfg)
+
+	// ES256, signed by the real key, with another service's audience.
+	es := jwtlib.NewWithClaims(jwtlib.SigningMethodES256, jwtlib.MapClaims{
+		"exp": time.Now().Add(time.Hour).Unix(),
+		"iss": testIssuer,
+		"aud": "some-other-service",
+	})
+	es.Header["kid"] = "kid-1"
+	esTok, err := es.SignedString(key)
+	if err != nil {
+		t.Fatalf("sign ES256: %v", err)
+	}
+	if w := get(r, "Authorization", "Bearer "+esTok); w.Code != http.StatusUnauthorized {
+		t.Errorf("ES256 for another audience: expected 401, got %d", w.Code)
+	}
+
+	// HS256, signed with the real secret, with another service's audience.
+	hs := jwtlib.NewWithClaims(jwtlib.SigningMethodHS256, jwtlib.MapClaims{
+		"exp": time.Now().Add(time.Hour).Unix(),
+		"iss": testIssuer,
+		"aud": "some-other-service",
+	})
+	hsTok, err := hs.SignedString([]byte("shared-secret"))
+	if err != nil {
+		t.Fatalf("sign HS256: %v", err)
+	}
+	if w := get(r, "Authorization", "Bearer "+hsTok); w.Code != http.StatusUnauthorized {
+		t.Errorf("HS256 for another audience: expected 401, got %d", w.Code)
+	}
+}
+
 // TestTenantAuth_JWKS_RejectsAlgNone covers the other half of the family
 // check: an unsigned token must not be accepted whatever is configured.
 func TestTenantAuth_JWKS_RejectsAlgNone(t *testing.T) {
 	srv := jwksServer(t, "kid-1", newES256Key(t).Public(), nil)
 
 	reg := buildTestRegistry(t)
-	cfg := &config.Config{JWT: config.JWTConfig{JWKSURI: srv.URL, RequireAuth: true}}
-	r := newRouter(middleware.TenantAuth(reg, cfg, zap.NewNop()))
+	cfg := &config.Config{JWT: config.JWTConfig{JWKSURI: srv.URL, Issuer: testIssuer, Audience: []string{testAudience}, RequireAuth: true}}
+	r := authRouter(t, reg, cfg)
 
 	tok := jwtlib.NewWithClaims(jwtlib.SigningMethodNone, jwtlib.MapClaims{
 		"exp": time.Now().Add(time.Hour).Unix(),
@@ -640,8 +718,8 @@ func TestTenantAuth_JWKS_RejectsAlgNone(t *testing.T) {
 // and must be refused rather than fall through to the HMAC branch.
 func TestTenantAuth_SecretOnly_RejectsES256(t *testing.T) {
 	reg := buildTestRegistry(t)
-	cfg := &config.Config{JWT: config.JWTConfig{Secret: "shared-secret", RequireAuth: true}}
-	r := newRouter(middleware.TenantAuth(reg, cfg, zap.NewNop()))
+	cfg := &config.Config{JWT: config.JWTConfig{Secret: "shared-secret", Issuer: testIssuer, Audience: []string{testAudience}, RequireAuth: true}}
+	r := authRouter(t, reg, cfg)
 
 	token := makeES256JWT(t, newES256Key(t), "kid-1", "")
 	if w := get(r, "Authorization", "Bearer "+token); w.Code != http.StatusUnauthorized {
@@ -659,9 +737,11 @@ func TestTenantAuth_DualValidation(t *testing.T) {
 	cfg := &config.Config{JWT: config.JWTConfig{
 		JWKSURI:     srv.URL,
 		Secret:      "shared-secret",
+		Issuer:      testIssuer,
+		Audience:    []string{testAudience},
 		RequireAuth: true,
 	}}
-	r := newRouter(middleware.TenantAuth(reg, cfg, zap.NewNop()))
+	r := authRouter(t, reg, cfg)
 
 	es256 := makeES256JWT(t, key, "kid-1", "")
 	if w := get(r, "Authorization", "Bearer "+es256); w.Code != http.StatusOK {
@@ -684,14 +764,16 @@ func TestTenantAuth_DualValidation(t *testing.T) {
 // TestTenantAuth_JWKS_CachesKeySet pins that the key set is not refetched per
 // request: the issuer's endpoint is on the hot path of every authenticated
 // call, and a fetch per request would make this service a load generator.
+// go-tokenauth fetches once when the validator starts and then refreshes in
+// the background, so the five requests below should add no fetches at all.
 func TestTenantAuth_JWKS_CachesKeySet(t *testing.T) {
 	var hits int32
 	key := newES256Key(t)
 	srv := jwksServer(t, "kid-1", key.Public(), &hits)
 
 	reg := buildTestRegistry(t)
-	cfg := &config.Config{JWT: config.JWTConfig{JWKSURI: srv.URL, RequireAuth: true}}
-	r := newRouter(middleware.TenantAuth(reg, cfg, zap.NewNop()))
+	cfg := &config.Config{JWT: config.JWTConfig{JWKSURI: srv.URL, Issuer: testIssuer, Audience: []string{testAudience}, RequireAuth: true}}
+	r := authRouter(t, reg, cfg)
 
 	token := makeES256JWT(t, key, "kid-1", "")
 	for i := 0; i < 5; i++ {
@@ -711,8 +793,8 @@ func TestTenantAuth_JWKS_TenantClaimStillApplies(t *testing.T) {
 	srv := jwksServer(t, "kid-1", key.Public(), nil)
 
 	reg := buildTestRegistry(t)
-	cfg := &config.Config{JWT: config.JWTConfig{JWKSURI: srv.URL, RequireAuth: true}}
-	r := newRouter(middleware.TenantAuth(reg, cfg, zap.NewNop()))
+	cfg := &config.Config{JWT: config.JWTConfig{JWKSURI: srv.URL, Issuer: testIssuer, Audience: []string{testAudience}, RequireAuth: true}}
+	r := authRouter(t, reg, cfg)
 
 	// An unknown tenant_id falls back to "default", same as the HMAC path.
 	token := makeES256JWT(t, key, "kid-1", "no-such-tenant")

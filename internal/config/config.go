@@ -212,13 +212,18 @@ type JWTConfig struct {
 	// across families, so an ES256 token is never checked against the HMAC
 	// secret, nor the reverse.
 	JWKSURI string `yaml:"jwks_uri" envconfig:"JWT_JWKS_URI"`
-	// JWKSCacheTTL is how long a fetched key set is reused. Default 15m.
-	JWKSCacheTTL time.Duration `yaml:"jwks_cache_ttl" envconfig:"JWT_JWKS_CACHE_TTL"`
-	// JWKSTimeout bounds one key set fetch. Default 5s.
-	JWKSTimeout time.Duration `yaml:"jwks_timeout" envconfig:"JWT_JWKS_TIMEOUT"`
-	// Issuer is the expected iss claim. When non-empty, tokens with a different
-	// issuer are rejected.
+	// JWKSRefresh is the interval of the background key set refresh that
+	// go-tokenauth runs while the service is up. Default 5m.
+	JWKSRefresh time.Duration `yaml:"jwks_refresh" envconfig:"JWT_JWKS_REFRESH"`
+	// Issuer is the expected iss claim. Required whenever JWT authentication
+	// is configured: without it any issuer holding a key this service will
+	// fetch could mint an accepted token.
 	Issuer string `yaml:"issuer" envconfig:"JWT_ISSUER"`
+	// Audience lists the accepted aud values -- this service's own
+	// identifiers. Required whenever JWT authentication is configured: an
+	// unrestricted audience lets a token minted for any other service in the
+	// estate be replayed against this one.
+	Audience []string `yaml:"audience" envconfig:"JWT_AUDIENCE"`
 	// RequireAuth, when true, rejects requests that carry no valid Bearer JWT.
 	// When false (default), unauthenticated requests receive the default tenant
 	// context — suitable for development and gradual rollout. This is
@@ -349,6 +354,19 @@ func (c *Config) Validate() error {
 	}
 	if err := validateJWKSURI(c.JWT.JWKSURI); err != nil {
 		return err
+	}
+	// go-tokenauth refuses to validate a token without an audience
+	// restriction or an expected issuer rather than skipping the check, so a
+	// JWT configuration missing either would reject every request at runtime.
+	// Failing at startup instead says which key is missing.
+	if c.JWT.JWKSURI != "" || c.JWT.Secret != "" {
+		if len(c.JWT.Audience) == 0 {
+			return fmt.Errorf("config: jwt.audience is required when jwt.jwks_uri or jwt.secret is set; " +
+				"list this service's own audience values so a token minted for another service is not accepted here")
+		}
+		if c.JWT.Issuer == "" {
+			return fmt.Errorf("config: jwt.issuer is required when jwt.jwks_uri or jwt.secret is set")
+		}
 	}
 	switch c.Logging.Format {
 	case "", LogFormatConsole, LogFormatJSON:

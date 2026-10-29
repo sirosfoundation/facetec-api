@@ -140,11 +140,11 @@ JWT settings:
 | YAML key | Env variable | Default | Description |
 |----------|-------------|---------|-------------|
 | `jwt.jwks_uri` | `JWT_JWKS_URI` | *(empty)* | Issuer's JSON Web Key Set endpoint, e.g. `https://backend.siros.org/.well-known/jwks.json`. Must be `https` (plain `http` only for localhost) |
-| `jwt.jwks_cache_ttl` | `JWT_JWKS_CACHE_TTL` | `15m` | How long a fetched key set is reused |
-| `jwt.jwks_timeout` | `JWT_JWKS_TIMEOUT` | `5s` | Timeout of one key set fetch |
+| `jwt.jwks_refresh` | `JWT_JWKS_REFRESH` | `5m` | Interval of the background key set refresh |
 | `jwt.secret` | `JWT_SECRET` | *(empty)* | HMAC shared secret for HS256/384/512 |
 | `jwt.secret_path` | `JWT_SECRET_PATH` | *(optional)* | File containing the JWT secret |
-| `jwt.issuer` | `JWT_ISSUER` | *(empty)* | Expected `iss` claim; leave empty to skip validation |
+| `jwt.issuer` | `JWT_ISSUER` | *(empty)* | Expected `iss` claim. **Required** whenever `jwt.jwks_uri` or `jwt.secret` is set |
+| `jwt.audience` | `JWT_AUDIENCE` | *(empty)* | Accepted `aud` values — this service's own identifiers. **Required** whenever `jwt.jwks_uri` or `jwt.secret` is set |
 | `jwt.require_auth` | `JWT_REQUIRE_AUTH` | `false` | Reject requests without a valid JWT |
 | `security.app_key` | `SECURITY_APP_KEY` | *(optional)* | Legacy Bearer token (set directly or via `app_key_path`) |
 | `security.app_key_path` | `SECURITY_APP_KEY_PATH` | *(optional)* | File containing a legacy Bearer token |
@@ -155,11 +155,19 @@ the old one are both accepted while deployments roll over. Startup logs a warnin
 `jwt.secret` is still configured alongside `jwt.jwks_uri` — removing it completes the migration
 and leaves this service with no key capable of issuing a token.
 
-The key set is fetched lazily, cached for `jwt.jwks_cache_ttl`, and re-fetched when a token
-presents an unknown `kid`, which is how key rotation at the issuer reaches a running process.
-Re-fetching is rate-limited to once a minute, because the `kid` in a token is attacker-controlled
-and an unthrottled refetch would make this service a load generator against the issuer. An
-unreachable key set fails closed: tokens are refused, never waved through.
+Token validation is [go-tokenauth](https://github.com/sirosfoundation/go-tokenauth), the shared
+SIROS library, rather than middleware of this service's own. The key set is fetched once at
+startup, refreshed in the background every `jwt.jwks_refresh`, and re-fetched on demand when a
+token presents an unknown `kid`, which is how key rotation at the issuer reaches a running
+process. On-demand re-fetching is rate-limited, because the `kid` in a token is
+attacker-controlled and an unthrottled refetch would make this service a load generator against
+the issuer. An unreachable key set fails closed: tokens are refused, never waved through.
+
+`jwt.audience` and `jwt.issuer` are mandatory in both JWT modes. go-tokenauth refuses to
+validate a token without an audience restriction or an expected issuer rather than skipping
+those checks, so a configuration missing either would start and then reject every request;
+startup refuses it instead. Audience binding is what stops a token minted for another service
+in the estate — correctly signed, unexpired, from the same issuer — being replayed here.
 | `security.rate_limit.enabled` | `SECURITY_RATE_LIMIT_ENABLED` | `true` | Enable per-IP rate limiting on biometric endpoints |
 | `security.rate_limit.requests_per_minute` | `SECURITY_RATE_LIMIT_RPM` | `10` | Per-IP rate limit on biometric endpoints |
 

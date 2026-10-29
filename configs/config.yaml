@@ -135,8 +135,7 @@ jwt:
   # public keys. Must be https (plain http only for localhost). With this set
   # and no secret below, this service holds nothing that can mint a token.
   # jwks_uri: "https://backend.siros.org/.well-known/jwks.json"
-  # jwks_cache_ttl: "15m"
-  # jwks_timeout: "5s"
+  # jwks_refresh: "5m"
 
   # HMAC secret for HS256/HS384/HS512. Use secret_path in production.
   # Both this and jwks_uri may be set during the migration (#12): a token is
@@ -144,8 +143,14 @@ jwt:
   # secret: ""
   # secret_path: "/run/secrets/jwt_secret"
 
-  # Expected iss claim. Leave empty to skip issuer validation.
+  # Expected iss claim. REQUIRED whenever jwks_uri or secret is set.
   # issuer: "https://auth.siros.org"
+
+  # Accepted aud values -- this service's own identifiers. REQUIRED whenever
+  # jwks_uri or secret is set: an unrestricted audience would let a token
+  # minted for another service in the estate be replayed against this one.
+  # audience:
+  #   - "facetec-api"
 
   # When true, requests without a valid Bearer JWT are rejected (recommended in prod).
   require_auth: false
