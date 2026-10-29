@@ -1,5 +1,5 @@
 .PHONY: all build test test-unit test-integration lint fmt vet clean \
-        docker docker-push run dev proto help setup
+        docker docker-push run dev help setup build-production
 
 # ── Build variables ──────────────────────────────────────────────────────────
 BINARY      := facetec-api
@@ -37,10 +37,15 @@ TESTPKGS := \
 
 all: lint test build ## Run lint, test, build (default)
 
-build: ## Build the server binary
+build: ## Build the server binary (development; permits trust.required: false)
 	@echo "Building $(BINARY) $(VERSION)..."
 	@mkdir -p bin
 	@go build $(LDFLAGS) -o bin/$(BINARY) ./cmd/server
+
+build-production: ## Build with -tags production (refuses trust.required: false)
+	@echo "Building $(BINARY) $(VERSION) [production]..."
+	@mkdir -p bin
+	@go build -tags production $(LDFLAGS) -o bin/$(BINARY) ./cmd/server
 
 build-linux: ## Cross-compile for Linux amd64
 	@echo "Building $(BINARY) for linux/amd64..."
@@ -84,9 +89,6 @@ vet: ## Run go vet
 	@go vet ./...
 
 # ── Proto ─────────────────────────────────────────────────────────────────────
-proto: ## Regenerate internal/gen/ from vc proto files
-	@./scripts/generate-proto.sh
-
 # ── Docker ────────────────────────────────────────────────────────────────────
 docker: ## Build Docker image
 	@echo "Building Docker image $(DOCKER_IMAGE):$(DOCKER_TAG)..."
@@ -119,8 +121,6 @@ tools: ## Install required development tools
 	@echo "Installing development tools..."
 	@go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
 	@go install github.com/air-verse/air@latest
-	@go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
-	@go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
 	@echo "Done."
 
 setup: ## Set up development environment (install hooks)

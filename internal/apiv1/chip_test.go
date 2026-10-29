@@ -203,9 +203,13 @@ func TestAssessChip_OCRMismatchIssuesFromChip(t *testing.T) {
 	assert.Equal(t, "F", dd.Sex)
 }
 
-// The chip's identity is used even when the PDP does not trust the document
-// signer (e.g. an ID card, where trust is not required): its signature and
-// hashes were verified locally, so it is never worse than OCR.
+// The chip's identity is applied from locally verified data whatever the PDP
+// says -- that part is unchanged, and still worth pinning, because the identity
+// substitution and the trust decision are separate steps. What changed with #85
+// is the verdict: an ID card whose signer the PDP does not trust is now refused
+// rather than left to the SPOCP rules. trust.required is no longer scoped to
+// passports, because ID cards are ICAO 9303 documents signed under the same
+// CSCAs.
 func TestAssessChip_IdentityAppliedWithoutPDPTrust(t *testing.T) {
 	chip := emrtdtest.New(emrtdtest.Options{DocumentCode: "ID"})
 	c := &Client{chip: emrtd.NewChecker(&fakeEvaluator{dec: emrtd.TrustDecision{Trusted: false, Code: "unknown_csca"}}, true)}
@@ -213,8 +217,28 @@ func TestAssessChip_IdentityAppliedWithoutPDPTrust(t *testing.T) {
 		ChipRaw:      chip.Raw,
 		DocumentData: facetec.DocumentData{DocumentType: "id_card", FamilyName: "WRONG"},
 	}}
-	require.Nil(t, c.assessChip(t.Context(), scan), "trust.required covers passports only")
+	rej := c.assessChip(t.Context(), scan)
+	require.NotNil(t, rej, "an untrusted ID card chip is refused (#85)")
+	assert.Equal(t, idverrors.CodeChipUntrusted, rej.Code)
+
+	// The identity was still taken from the chip before the refusal, so a
+	// later diagnostic reads the signed values rather than the OCR ones.
 	assert.False(t, scan.IDScan.ChipTrusted)
+	assert.True(t, scan.IDScan.ChipIdentityApplied)
+	assert.Equal(t, chip.FamilyName, scan.IDScan.DocumentData.FamilyName)
+}
+
+// With trust.required off -- a development stack with no PDP, which a
+// production build refuses to run -- the old behaviour remains: the identity is
+// applied and nothing is refused on trust grounds.
+func TestAssessChip_IdentityAppliedWithoutTrustRequired(t *testing.T) {
+	chip := emrtdtest.New(emrtdtest.Options{DocumentCode: "ID"})
+	c := &Client{chip: emrtd.NewChecker(&fakeEvaluator{dec: emrtd.TrustDecision{Trusted: false, Code: "unknown_csca"}}, false)}
+	scan := &facetec.ScanResult{IDScan: facetec.IDScanResult{
+		ChipRaw:      chip.Raw,
+		DocumentData: facetec.DocumentData{DocumentType: "id_card", FamilyName: "WRONG"},
+	}}
+	require.Nil(t, c.assessChip(t.Context(), scan))
 	assert.True(t, scan.IDScan.ChipIdentityApplied)
 	assert.Equal(t, chip.FamilyName, scan.IDScan.DocumentData.FamilyName)
 }
@@ -368,12 +392,16 @@ func TestAssessChip_TrustedPortraitBoundToDG2(t *testing.T) {
 }
 
 // The portrait follows the identity: a chip whose signature and hashes verify
-// but whose signer the PDP does not trust (an ID card, where trust is not
-// required) still replaces FaceTec's photoIDFaceCrop with the DG2 image, so
-// the credential never pairs the chip's name with a crop from the camera.
+// but whose signer the PDP does not trust still replaces FaceTec's
+// photoIDFaceCrop with the DG2 image, so nothing downstream pairs the chip's
+// name with a crop from the camera.
+//
+// Checked with trust.required off, since #85 makes an untrusted chip a refusal
+// when it is on -- the binding itself is what this test is about, and it
+// happens before any verdict.
 func TestAssessChip_PortraitBoundToDG2WithoutPDPTrust(t *testing.T) {
 	chip := emrtdtest.New(emrtdtest.Options{DocumentCode: "ID"})
-	c := &Client{chip: emrtd.NewChecker(&fakeEvaluator{dec: emrtd.TrustDecision{Trusted: false, Code: "unknown_csca"}}, true)}
+	c := &Client{chip: emrtd.NewChecker(&fakeEvaluator{dec: emrtd.TrustDecision{Trusted: false, Code: "unknown_csca"}}, false)}
 	scan := &facetec.ScanResult{IDScan: facetec.IDScanResult{
 		ChipRaw:      chip.Raw,
 		ChipPortrait: "dg2-portrait",
@@ -423,9 +451,11 @@ func TestProcessRequest_Status4WithoutRawChipDataRefusedWhenRequired(t *testing.
 	assert.Equal(t, 0, pdp.calls)
 }
 
-// trust.required is scoped to passports: an authenticated driving-licence chip
-// (not an ICAO eMRTD) is left to the NFC gate and policy.
-func TestAssessChip_RequiredDoesNotApplyToDrivingLicence(t *testing.T) {
+// trust.required now applies to every document type (#85), so an authenticated
+// driving-licence chip this service cannot verify is refused rather than left
+// to the NFC gate and policy. This is the accepted cost in the issue: ISO 18013
+// licences stay refused until their chips and trust lists are supported.
+func TestAssessChip_RequiredAppliesToDrivingLicence(t *testing.T) {
 	c := &Client{chip: emrtd.NewChecker(&fakeEvaluator{}, true)}
 	scan := &facetec.ScanResult{IDScan: facetec.IDScanResult{
 		NFCVerified:    true,
@@ -433,7 +463,9 @@ func TestAssessChip_RequiredDoesNotApplyToDrivingLicence(t *testing.T) {
 		ChipRaw:        map[string]string{"EF.COM": "AAAA"},
 		DocumentData:   facetec.DocumentData{DocumentType: "dl"},
 	}}
-	require.Nil(t, c.assessChip(t.Context(), scan))
+	rej := c.assessChip(t.Context(), scan)
+	require.NotNil(t, rej, "a driving licence chip we cannot verify is refused")
+	assert.Equal(t, idverrors.CodeChipUntrusted, rej.Code)
 	assert.False(t, scan.IDScan.ChipTrusted)
 }
 
@@ -462,4 +494,61 @@ func TestAssessChip_RequiredAppliesWhenDocumentTypeMissing(t *testing.T) {
 	err := c.assessChip(t.Context(), scan)
 	require.NotNil(t, err)
 	assert.Equal(t, idverrors.CodeChipUntrusted, err.Code)
+}
+
+// ── Verified-identity gate (#85) ─────────────────────────────────────────────
+
+// TestVerifiedIdentityRejection is the gate that keeps OCR of a printed page
+// out of an issued credential. Both halves are needed: the identity must have
+// come from the chip, and the chip's signer must be trusted. A chip signature
+// over forged data is worthless without a trusted signer.
+func TestVerifiedIdentityRejection(t *testing.T) {
+	for _, tt := range []struct {
+		name            string
+		required        bool
+		identityApplied bool
+		trusted         bool
+		wantRejected    bool
+	}{
+		{"verified and trusted", true, true, true, false},
+		{"no chip identity", true, false, true, true},
+		{"chip identity, untrusted signer", true, true, false, true},
+		{"neither", true, false, false, true},
+		// trust.required off is the development opt-out; a production build
+		// refuses that configuration (config.Validate), so this row is only
+		// reachable on a development stack.
+		{"opt-out: no chip identity", false, false, false, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			c := &Client{chip: emrtd.NewChecker(&fakeEvaluator{}, tt.required)}
+			rej := c.verifiedIdentityRejection(facetec.IDScanResult{
+				ChipIdentityApplied: tt.identityApplied,
+				ChipTrusted:         tt.trusted,
+			})
+			if tt.wantRejected {
+				require.NotNil(t, rej)
+				assert.Equal(t, idverrors.CodeChipDataUnverified, rej.Code)
+			} else {
+				assert.Nil(t, rej)
+			}
+		})
+	}
+}
+
+// TestVerifiedIdentityRejection_DistinguishesTheTwoCauses: the message has to
+// say which half failed, because the operator's remedy differs -- an
+// unsupported chip format is a roadmap item, an untrusted signer is a missing
+// CSCA anchor.
+func TestVerifiedIdentityRejection_DistinguishesTheTwoCauses(t *testing.T) {
+	c := &Client{chip: emrtd.NewChecker(&fakeEvaluator{}, true)}
+
+	noIdentity := c.verifiedIdentityRejection(facetec.IDScanResult{ChipTrusted: true})
+	require.NotNil(t, noIdentity)
+	assert.Contains(t, noIdentity.Message, "not read in a format this service can verify")
+
+	untrusted := c.verifiedIdentityRejection(facetec.IDScanResult{ChipIdentityApplied: true})
+	require.NotNil(t, untrusted)
+	assert.Contains(t, untrusted.Message, "not signed by a trusted document signer")
+
+	assert.Equal(t, noIdentity.Code, untrusted.Code, "one code, two messages")
 }

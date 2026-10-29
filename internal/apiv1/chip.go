@@ -71,19 +71,52 @@ func (c *Client) assessChip(ctx context.Context, scan *facetec.ScanResult) *idve
 	// Any sign of a chip read counts as presented, so an incomplete payload
 	// (status reported but SOD missing, stray raw fields) cannot dodge the gate.
 	presented := out.ChipPresented || id.ChipAuthStatus != 0 || len(id.ChipRaw) > 0 || id.NFCVerified
-	// trust.required is enforced for passports (and for scans that reported no
-	// document type at all, which fail closed) only: the PDP's eMRTD registry
-	// covers ICAO 9303 travel documents, and other documents' chips (e.g. an
-	// ISO 18013 driving licence) are governed by the NFC gate and policy
-	// (nfc-verified), not by this check.
 	// A signed document code that contradicts the reported type is refused
 	// outright: the reported type picks the policy rule, so it must not be
-	// usable to step outside the passport trust scope below.
+	// usable to step outside the trust check below.
 	if out.Reason == emrtd.ReasonDocTypeMismatch {
 		return idverrors.New(idverrors.CodeChipUntrusted, "eMRTD chip contradicts the reported document type")
 	}
-	if c.chip.Required() && (id.DocumentData.DocumentType == "passport" || id.DocumentData.DocumentType == "") && presented && !out.Trusted {
+	// trust.required applies to every document type (#85). It used to be
+	// enforced for passports and for scans reporting no type at all, on the
+	// grounds that the PDP's registry covers ICAO 9303 travel documents --
+	// but ID cards are ICAO 9303 documents too, and many states sign them
+	// under the same CSCA as their passports, so exempting them meant issuing
+	// an ID card credential from a signer nobody vouched for. A document
+	// whose chip this service cannot verify is now refused rather than left
+	// to the SPOCP rules, which is the cost the issue accepts: an ISO 18013
+	// driving licence is refused until its chips are supported.
+	if c.chip.Required() && presented && !out.Trusted {
 		return idverrors.Newf(idverrors.CodeChipUntrusted, "eMRTD chip is not trusted (%s)", out.Reason)
+	}
+	return nil
+}
+
+// verifiedIdentityRejection refuses issuance unless the identity about to be
+// written into the credential came from the document's chip AND that chip's
+// signer is trusted (#85).
+//
+// It is deliberately a second gate rather than a clause inside assessChip.
+// assessChip decides what the chip evidence is worth; this states the
+// invariant the credential depends on -- nothing OCR'd from the printed page
+// reaches an issued credential -- at the point of issuance, so a future change
+// to the trust logic cannot silently reopen it. OCR of a data page is trivial
+// to forge, and a signature over forged data is worthless without a trusted
+// signer, which is why both halves are required.
+//
+// trust.required: false switches it off along with the trust check it depends
+// on, which is why a production build refuses that setting (config.Validate).
+func (c *Client) verifiedIdentityRejection(id facetec.IDScanResult) *idverrors.Error {
+	if !c.chip.Required() {
+		return nil
+	}
+	if !id.ChipIdentityApplied {
+		return idverrors.New(idverrors.CodeChipDataUnverified,
+			"no verified chip identity: the document's chip was not read in a format this service can verify")
+	}
+	if !id.ChipTrusted {
+		return idverrors.New(idverrors.CodeChipDataUnverified,
+			"the document's chip identity is not signed by a trusted document signer")
 	}
 	return nil
 }

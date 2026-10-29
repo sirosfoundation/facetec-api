@@ -39,7 +39,7 @@ technical and organisational measures (TOMs), and considerations relevant to GDP
 
 | Data element | Source | Destination |
 |---|---|---|
-| Given name | OCR of scanned document | VC issuer (gRPC) → included in issued credential |
+| Given name | OCR of scanned document | VC issuer (apigw REST) → included in issued credential |
 | Family name | OCR | VC issuer → credential |
 | Date of birth | OCR | VC issuer → credential |
 | Date of expiry | OCR | VC issuer → credential |
@@ -103,7 +103,7 @@ zeroing guarantees: restrict access and retention, and delete them after debuggi
 │    ⑥ FaceMap bytes zeroed (clear()) immediately                             │
 │    ⑦ DocumentData evaluated against SPOCP policy                           │
 │    ⑧ MRZ lines stripped from DocumentData                                  │
-│    ⑨ Stripped DocumentData forwarded ─────────────────────────────────────► VC Issuer (gRPC)
+│    ⑨ Stripped DocumentData forwarded ─────────────────────────────────────► VC Issuer (REST)
 │    ⑩ Signed credential stored in RAM (TTL = 5 min, one-time-use)           │
 │                                                                             │
 │  GET /v1/offer/:txid                                                        │
@@ -116,7 +116,7 @@ zeroing guarantees: restrict access and retention, and delete them after debuggi
 | Destination | Data sent |
 |---|---|
 | FaceTec Server (HTTPS) | FaceScan, AuditTrail, ID scan images, FaceMap (from RAM); all raw biometric data |
-| VC Issuer (gRPC) | DocumentData minus MRZ lines: name, DoB, nationality, sex, doc number, doc type, expiry, issuing country |
+| VC Issuer (apigw REST, HTTPS) | DocumentData minus MRZ lines: name, DoB, nationality, sex, doc number, doc type, expiry, issuing country |
 | Mobile wallet / client | Signed verifiable credential (opaque token; content determined by issuer) |
 
 **Data that never leaves facetec-api:**
@@ -262,7 +262,7 @@ The following technical controls are implemented in code:
 | **Storage limitation** | Biometric data is never written to disk. RAM retention is bounded by configurable short TTLs with fallback eviction. |
 | **Explicit zeroing** | `clear(faceMap)` is called on the `[]byte` FaceMap immediately after use (deferred in `SubmitIDScan`), and again by `Manager.Close()` on every in-memory entry at shutdown. |
 | **No body logging** | Gin middleware never logs request or response bodies. The panic-recovery handler is bound to `nil` to prevent biometric data appearing in crash dumps. |
-| **Structured logs scrubbed** | Log fields are explicitly enumerated: method, path, status, latency, IP, user-agent. Biometric scores are absent from Info-level logs, except the chip face-match level in the `credential_issued` audit event (§2.1), which records the evidence for the chip photo gate. |
+| **Structured logs scrubbed** | Log fields are explicitly enumerated: method, path, status, latency, IP, user-agent. The field set is the same whether `logging.format` is `console` or `json`; the format changes the encoding only. Biometric scores are absent from Info-level logs, except the chip face-match level in the `credential_issued` audit event (§2.1), which records the evidence for the chip photo gate. |
 | **Sensitive debug opt-in** | Document identity fields are excluded by default even at Debug level. `logging.include_pii` enables the development-only exception with a startup warning; portraits and raw biometric data remain excluded (§2.4). |
 | **One-time-use sessions** | Liveness entries and credential offers are deleted on first access (`TakeLiveness`, `TakeOffer`). An attacker cannot replay a session ID. |
 | **Rate limiting** | Biometric endpoints are rate-limited per source IP to slow automated bulk enumeration or scraping. |

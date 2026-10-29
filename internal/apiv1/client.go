@@ -80,7 +80,7 @@ func New(_ context.Context, cfg *config.Config, registry *tenant.Registry, log *
 	}
 	log.Info("vc issuer client ready", zap.String("addr", cfg.Issuer.Addr))
 
-	return &Client{
+	c := &Client{
 		cfg:      cfg,
 		log:      log,
 		ft:       ft,
@@ -88,7 +88,22 @@ func New(_ context.Context, cfg *config.Config, registry *tenant.Registry, log *
 		sessions: ses,
 		issuer:   issuer,
 		chip:     newChipChecker(cfg.Trust),
-	}, nil
+	}
+	warnIfTrustNotRequired(cfg, log)
+	return c, nil
+}
+
+// warnIfTrustNotRequired is called once at startup. A production build refuses
+// this configuration outright (config.Validate), so reaching here means a
+// development build, where the operator should still be told exactly what is
+// switched off (#85).
+func warnIfTrustNotRequired(cfg *config.Config, log *zap.Logger) {
+	if cfg.Trust.Required || log == nil {
+		return
+	}
+	log.Warn("SECURITY: trust.required is false — document-signer trust is NOT enforced and " +
+		"identity claims read by OCR from the printed page can reach an issued credential. " +
+		"Development and test stacks only; a production build refuses this setting")
 }
 
 // GetSessionToken proxies a session-token request to the FaceTec Server.
@@ -196,6 +211,18 @@ func (c *Client) SubmitIDScan(ctx context.Context, livenessSessionID string, idS
 	if rej := c.assessChip(ctx, &scanResult); rej != nil {
 		c.log.Info("id-scan scan rejected: chip check",
 			zap.String("tenant", tc.ID), zap.String("reason", scanResult.IDScan.ChipTrustReason))
+		return "", "", rej
+	}
+
+	// This path never carries raw chip data, so there is no verified chip
+	// identity to issue from and the gate refuses every scan reaching it
+	// (#85). That is the intended outcome, not a regression: the legacy split
+	// API cannot satisfy the rule that only chip-verified claims are issued.
+	if rej := c.verifiedIdentityRejection(scanResult.IDScan); rej != nil {
+		c.log.Info("id-scan scan rejected: no verified chip identity",
+			zap.String("tenant", tc.ID),
+			zap.String("doc_type", scanResult.IDScan.DocumentData.DocumentType),
+		)
 		return "", "", rej
 	}
 
@@ -329,6 +356,20 @@ func (c *Client) ProcessRequest(ctx context.Context, req *facetec.ProcessRequest
 			zap.String("doc_type", scanResult.IDScan.DocumentData.DocumentType),
 			zap.Int("chip_auth_status", scanResult.IDScan.ChipAuthStatus),
 			zap.String("chip_trust_reason", scanResult.IDScan.ChipTrustReason),
+		)
+		resp.CredentialIssueError = rej.Message
+		resp.CredentialIssueErrCode = string(rej.Code)
+		return resp, nil
+	}
+
+	// Hard gate: every identity claim in the credential must come from the
+	// chip's verified, trusted data, never from OCR of the printed page (#85).
+	if rej := c.verifiedIdentityRejection(scanResult.IDScan); rej != nil {
+		c.log.Info("process-request scan rejected: no verified chip identity",
+			zap.String("tenant", tc.ID),
+			zap.String("doc_type", scanResult.IDScan.DocumentData.DocumentType),
+			zap.Bool("chip_identity_applied", scanResult.IDScan.ChipIdentityApplied),
+			zap.Bool("chip_trusted", scanResult.IDScan.ChipTrusted),
 		)
 		resp.CredentialIssueError = rej.Message
 		resp.CredentialIssueErrCode = string(rej.Code)

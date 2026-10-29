@@ -13,7 +13,7 @@ services:
       # Override individual settings without editing the config file.
       # FACETEC_SERVER_URL: "https://your-facetec-server.example.org"
       # FACETEC_DEVICE_KEY_PATH: "/run/secrets/facetec_device_key"
-      # ISSUER_ADDR: "vc-issuer:8090"
+      # ISSUER_ADDR: "https://vc-issuer.example.org"
       LOG_LEVEL: "info"
     # Liveness / readiness probes (native Docker healthcheck).
     healthcheck:
