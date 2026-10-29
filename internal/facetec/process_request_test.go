@@ -3,6 +3,7 @@ package facetec
 import (
 	"fmt"
 	"testing"
+	"time"
 )
 
 // faceTecDocumentDataJSON is a realistic FaceTec Server v10 documentData JSON
@@ -404,11 +405,69 @@ func TestNormalizeFaceTecDate(t *testing.T) {
 		// to fall back on. Left as-is so the claim is dropped and the caller
 		// warns, rather than guessed at.
 		{"10 MAA 1965", "10 MAA 1965"},
+
+		// #71: the two month abbreviations are not always slash-separated. A
+		// passport whose local and English abbreviation coincide prints them as
+		// two words, and the year in the visual inspection zone is two digits.
+		// This was rejecting live passports with document_unreadable.
+		{"11 APR APR 30", "2030-04-11"},
+		{"11 APR 30", "2030-04-11"},
+		{"01 DEC DEC 25", "2025-12-01"},
+
+		// An unseparated pair that differs, either way round.
+		{"10 MRT MAR 65", "2065-03-10"},
+		{"10 MAR MRT 65", "2065-03-10"},
+
+		// A two-digit year is only read after every four-digit layout has
+		// failed, so a full year is never truncated to its last two digits.
+		{"11 APR APR 2030", "2030-04-11"},
+		{"18.02.87", "2087-02-18"},
+
+		// A two-letter abbreviation still pairs with its English half, so the
+		// pair is split rather than left whole and unparseable.
+		{"10 MA MAR 65", "2065-03-10"},
+
+		// Noise is not stripped: an unexpected shape stays unparsed so the
+		// claim is dropped and the caller warns, rather than being guessed at.
+		{"X 10 MAR 1965", "X 10 MAR 1965"},
 	}
 	for _, tt := range tests {
-		got := normalizeFaceTecDate(tt.input)
+		got := normalizeFaceTecDate(tt.input, false)
 		if got != tt.want {
-			t.Errorf("normalizeFaceTecDate(%q) = %q, want %q", tt.input, got, tt.want)
+			t.Errorf("normalizeFaceTecDate(%q, false) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
+// A two-digit year has no century of its own. ICAO 9303-3 resolves it the way
+// an MRZ date is read, and emrtd.mrzDateToISO already does so for the chip:
+// an expiry is 20xx, a birth date is 20xx unless that is in the future.
+func TestNormalizeFaceTecDate_TwoDigitYearCentury(t *testing.T) {
+	now = func() time.Time { return time.Date(2026, 10, 28, 0, 0, 0, 0, time.UTC) }
+	t.Cleanup(func() { now = time.Now })
+
+	for _, tt := range []struct {
+		input string
+		birth bool
+		want  string
+	}{
+		// An expiry is always this century, including one already past.
+		{"11 APR APR 30", false, "2030-04-11"},
+		{"11 APR APR 20", false, "2020-04-11"},
+
+		// A birth date in the future cannot be one, so it is the last century.
+		{"11 APR APR 30", true, "1930-04-11"},
+		{"11 APR APR 55", true, "1955-04-11"},
+
+		// A birth date that is already past stays in this century.
+		{"11 APR APR 20", true, "2020-04-11"},
+
+		// Go's own rule would read 55 as 2055 and 87 as 1987 regardless of
+		// which field it is; neither is what the spec says for an expiry.
+		{"11 APR APR 87", false, "2087-04-11"},
+	} {
+		if got := normalizeFaceTecDate(tt.input, tt.birth); got != tt.want {
+			t.Errorf("normalizeFaceTecDate(%q, birth=%v) = %q, want %q", tt.input, tt.birth, got, tt.want)
 		}
 	}
 }

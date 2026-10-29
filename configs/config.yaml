@@ -46,16 +46,26 @@ facetec:
     # cert_file:   "/etc/facetec-api/client.crt"       # Client certificate for mTLS.
     # key_file:    "/etc/facetec-api/client.key"        # Client private key for mTLS.
 
-# ── vc Credential Issuer (gRPC) ───────────────────────────────────────────────
+# ── vc Credential Issuer (apigw REST API) ─────────────────────────────────────
 issuer:
-  # gRPC address of the vc issuer service (required).
-  addr: "localhost:8090"
+  # Base URL of the vc apigw, scheme included (required). facetec-api POSTs to
+  # {addr}/api/v1/datastore and {addr}/api/v1/datastore/preauth_offer.
+  addr: "http://localhost:8080"
 
-  # Disable TLS for local development only.
+  # TLS verification for the outbound apigw connection. No effect on http://.
   tls: false
   # ca_file:   "/etc/facetec-api/issuer-ca.crt"
   # cert_file: "/etc/facetec-api/client.crt"
   # key_file:  "/etc/facetec-api/client.key"
+
+  # Bearer token for the apigw, when it requires one. Prefer api_key_path.
+  # api_key_path: "/run/secrets/issuer_api_key"
+
+  # Source system identifier sent with the upload (default: "facetec-api").
+  # authentic_source: "facetec-api"
+
+  # Verifiable Credential Type sent with the upload.
+  # vct: "https://credentials.example.org/photo-id"
 
   # Credential scope URI — must match a scope configured in the vc issuer.
   scope: "https://credentials.example.org/photo-id"
@@ -82,10 +92,15 @@ policy:
 trust:
   # pdp_url: "https://go-trust.example.org"
   timeout: "5s"
-  # required=true (the default) refuses to start without pdp_url and rejects any
-  # passport scan (or scan with no reported document type) whose chip is missing
-  # or untrusted outright; ID cards and driving licences are not covered by it. Development only: set false to run without a PDP
-  # (chip-trusted is then always false; the shipped passport rule will reject).
+  # required=true (the default) refuses to start without pdp_url, rejects any
+  # document whose chip is missing or untrusted, and refuses to issue a
+  # credential whose identity did not come from a verified, trusted chip
+  # (chip_data_unverified) -- see issue #85.
+  #
+  # Setting false switches both off, so OCR of the printed page could reach a
+  # credential. A production build (-tags production, which the Dockerfile
+  # uses) REFUSES to start with false; a development build accepts it and
+  # warns. This file is the development example, hence false.
   required: false
 
 # ── Session (in-memory only, never persisted) ─────────────────────────────────
@@ -139,6 +154,10 @@ jwt:
 logging:
   # Log level: debug, info, warn, error
   level: "info"
+  # Encoding: console (default, human-readable) or json (one object per line,
+  # for a log shipper or SIEM). Only the encoding -- level, auth requirements
+  # and everything else are configured independently.
+  format: "console"
   # Include sensitive NFC/OCR identity data only at debug level (LOG_INCLUDE_PII).
   # DEVELOPMENT/TEST ONLY — never enable in production. Emits a startup warning.
   include_pii: false

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 
 	"github.com/sirosfoundation/facetec-api/internal/apiv1"
 	"github.com/sirosfoundation/facetec-api/internal/config"
@@ -105,7 +106,7 @@ func main() {
 		svc  service
 	}
 	// Shutdown order matters: stop accepting HTTP traffic first, then release
-	// business-logic resources (session manager + gRPC connection).
+	// business-logic resources (session manager + issuer HTTP client).
 	shutdownOrder := []namedService{
 		{"http", httpSvc},
 		{"apiv1", apiv1Client},
@@ -138,7 +139,7 @@ func main() {
 }
 
 func buildLogger(cfg *config.Config) (*zap.Logger, error) {
-	zapCfg := zap.NewDevelopmentConfig()
+	zapCfg := loggerConfig(cfg.Logging.Format)
 	switch cfg.Logging.Level {
 	case "debug":
 		zapCfg.Level.SetLevel(zap.DebugLevel)
@@ -157,4 +158,45 @@ func buildLogger(cfg *config.Config) (*zap.Logger, error) {
 		logger.Warn("WARNING: sensitive PII debug logging is enabled (logging.include_pii). NFC/OCR identity data may be written to logs at debug level. NEVER enable this in production.")
 	}
 	return logger, nil
+}
+
+// loggerConfig returns the zap config for a log format. Anything other than
+// "json" -- including the empty default -- is the human-readable console
+// encoder this service has always used.
+//
+// The JSON config is assembled rather than taken from
+// zap.NewProductionConfig() for two reasons, both of which would otherwise be
+// silent:
+//
+//  1. That config enables sampling (initial 100, thereafter 100). zap's
+//     sampler counts per level and message, and this service logs every
+//     issuance under the one constant message "AUDIT credential_issued", so
+//     above 100 issuances a second it would keep 1 in 100 and discard the
+//     rest. Dropping audit records to save log volume is not a trade this
+//     service may make, so sampling stays off.
+//  2. That config writes the timestamp as a float of seconds since the
+//     epoch. RFC3339 with nanoseconds is what a log shipper or SIEM can read
+//     without being told how.
+//
+// Level stays under logging.level either way: NewProductionConfig() would
+// have pinned it to info and quietly ignored logging.level: debug.
+func loggerConfig(format string) zap.Config {
+	if format != config.LogFormatJSON {
+		return zap.NewDevelopmentConfig()
+	}
+
+	encoder := zap.NewProductionEncoderConfig()
+	encoder.EncodeTime = zapcore.RFC3339NanoTimeEncoder
+
+	return zap.Config{
+		Level:    zap.NewAtomicLevelAt(zap.InfoLevel),
+		Encoding: "json",
+		// Development false keeps stacktraces to error and above; the console
+		// config attaches them from warn up, which is noise in a shipper.
+		Development:      false,
+		Sampling:         nil,
+		EncoderConfig:    encoder,
+		OutputPaths:      []string{"stderr"},
+		ErrorOutputPaths: []string{"stderr"},
+	}
 }
