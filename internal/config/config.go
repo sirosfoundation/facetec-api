@@ -54,7 +54,7 @@ type ServerConfig struct {
 	PublicBaseURL string    `yaml:"public_base_url" envconfig:"SERVER_PUBLIC_BASE_URL"`
 	TLS           TLSConfig `yaml:"tls"`
 	// MaxConcurrentBiometric limits the number of biometric requests
-	// (process-request, liveness, id-scan, session-token) processed at once.
+	// (process-request) processed at once.
 	// Each request amplifies payload size ~3-4× in memory; this cap prevents
 	// OOM under sustained concurrency. 0 means unlimited.
 	MaxConcurrentBiometric int `yaml:"max_concurrent_biometric" envconfig:"SERVER_MAX_CONCURRENT_BIOMETRIC"`
