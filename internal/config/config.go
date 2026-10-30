@@ -199,9 +199,29 @@ type JWTConfig struct {
 	Secret string `yaml:"secret" envconfig:"JWT_SECRET"`
 	// SecretPath loads Secret from a file (takes precedence over Secret).
 	SecretPath string `yaml:"secret_path" envconfig:"JWT_SECRET_PATH"`
-	// Issuer is the expected iss claim. When non-empty, tokens with a different
-	// issuer are rejected.
+	// JWKSURI is the issuer's JSON Web Key Set endpoint. When set, Bearer
+	// JWTs signed with ES256/ES384/EdDSA are verified against the public key
+	// matching the token's kid. This is the direction of travel (#12): the
+	// issuing service holds a private key and this service holds no secret
+	// capable of minting a token.
+	//
+	// Secret and JWKSURI may both be set during the migration, in which case
+	// a token is verified by whichever matches its algorithm family -- never
+	// across families, so an ES256 token is never checked against the HMAC
+	// secret, nor the reverse.
+	JWKSURI string `yaml:"jwks_uri" envconfig:"JWT_JWKS_URI"`
+	// JWKSRefresh is the interval of the background key set refresh that
+	// go-tokenauth runs while the service is up. Default 5m.
+	JWKSRefresh time.Duration `yaml:"jwks_refresh" envconfig:"JWT_JWKS_REFRESH"`
+	// Issuer is the expected iss claim. Required whenever JWT authentication
+	// is configured: without it any issuer holding a key this service will
+	// fetch could mint an accepted token.
 	Issuer string `yaml:"issuer" envconfig:"JWT_ISSUER"`
+	// Audience lists the accepted aud values -- this service's own
+	// identifiers. Required whenever JWT authentication is configured: an
+	// unrestricted audience lets a token minted for any other service in the
+	// estate be replayed against this one.
+	Audience []string `yaml:"audience" envconfig:"JWT_AUDIENCE"`
 	// RequireAuth, when true, rejects requests that carry no valid Bearer JWT.
 	// When false (default), unauthenticated requests receive the default tenant
 	// context — suitable for development and gradual rollout. This is
@@ -299,11 +319,52 @@ func Load(path string) (*Config, error) {
 	return cfg, nil
 }
 
+// validateJWKSURI requires an https key set endpoint. The key set decides which
+// tokens this service accepts, so fetching it over plaintext would let anyone on
+// the path substitute their own key and mint tokens at will -- a far worse
+// exposure than the shared secret this is meant to replace. A loopback host is
+// exempt so a local stack can run without a certificate.
+func validateJWKSURI(raw string) error {
+	if raw == "" {
+		return nil
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("config: jwt.jwks_uri is not a valid URL: %w", err)
+	}
+	if u.Host == "" {
+		return fmt.Errorf("config: jwt.jwks_uri must be absolute, got %q", raw)
+	}
+	if u.Scheme != "https" && !isLoopbackHost(u.Hostname()) {
+		return fmt.Errorf("config: jwt.jwks_uri must use https (plain http is only allowed for localhost development)")
+	}
+	if u.Scheme != "https" && u.Scheme != "http" {
+		return fmt.Errorf("config: jwt.jwks_uri must use https, got scheme %q", u.Scheme)
+	}
+	return nil
+}
+
 // Validate returns an error if required fields are missing or if the
 // configuration is unsafe for a production deployment.
 func (c *Config) Validate() error {
 	if c.Logging.IncludePII && c.Logging.Level != "debug" {
 		return fmt.Errorf("config: logging.include_pii requires logging.level: debug")
+	}
+	if err := validateJWKSURI(c.JWT.JWKSURI); err != nil {
+		return err
+	}
+	// go-tokenauth refuses to validate a token without an audience
+	// restriction or an expected issuer rather than skipping the check, so a
+	// JWT configuration missing either would reject every request at runtime.
+	// Failing at startup instead says which key is missing.
+	if c.JWT.JWKSURI != "" || c.JWT.Secret != "" {
+		if len(c.JWT.Audience) == 0 {
+			return fmt.Errorf("config: jwt.audience is required when jwt.jwks_uri or jwt.secret is set; " +
+				"list this service's own audience values so a token minted for another service is not accepted here")
+		}
+		if c.JWT.Issuer == "" {
+			return fmt.Errorf("config: jwt.issuer is required when jwt.jwks_uri or jwt.secret is set")
+		}
 	}
 	switch c.Logging.Format {
 	case "", LogFormatConsole, LogFormatJSON:
@@ -366,14 +427,14 @@ func (c *Config) Validate() error {
 		// this check only ensures TenantAuth has *something* to validate
 		// against; whether unauthenticated requests are actually rejected at
 		// runtime is still controlled separately by JWT.RequireAuth.
-		if c.Security.AppKey == "" && c.JWT.Secret == "" {
-			return fmt.Errorf("config: jwt.secret (or legacy security.app_key) is required")
+		if c.Security.AppKey == "" && c.JWT.Secret == "" && c.JWT.JWKSURI == "" {
+			return fmt.Errorf("config: jwt.jwks_uri, jwt.secret or legacy security.app_key is required")
 		}
 	} else {
 		// Multi-tenant mode: JWT is the only supported auth mechanism.
 		// Plain per-tenant app keys are not supported — use jwt.secret.
-		if c.JWT.Secret == "" {
-			return fmt.Errorf("config: jwt.secret is required in multi-tenant mode")
+		if c.JWT.Secret == "" && c.JWT.JWKSURI == "" {
+			return fmt.Errorf("config: jwt.jwks_uri or jwt.secret is required in multi-tenant mode")
 		}
 		// Validate each tenant entry.
 		ids := make(map[string]bool, len(c.Tenants))

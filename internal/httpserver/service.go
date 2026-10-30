@@ -24,6 +24,7 @@ type Service struct {
 	router          *gin.Engine
 	server          *http.Server
 	stopRateLimiter func() // nil when rate limiting is disabled
+	stopTokenAuth   func() // nil unless JWT authentication is configured
 }
 
 // New creates and configures the HTTP service but does not start listening.
@@ -90,6 +91,9 @@ func (s *Service) Close(ctx context.Context) error {
 	if s.stopRateLimiter != nil {
 		s.stopRateLimiter()
 	}
+	if s.stopTokenAuth != nil {
+		s.stopTokenAuth()
+	}
 	return s.server.Shutdown(ctx)
 }
 
@@ -103,7 +107,8 @@ func (s *Service) registerRoutes(r *gin.Engine, registry *tenant.Registry) {
 	r.GET("/metrics", gin.WrapH(promhttp.Handler()))
 
 	// Versioned API — authentication + rate limiting applied to all routes.
-	auth := middleware.TenantAuth(registry, s.cfg, s.log)
+	auth, stopAuth := middleware.TenantAuth(registry, s.cfg, s.log)
+	s.stopTokenAuth = stopAuth
 	rl, stopRL := middleware.RateLimit(&s.cfg.Security, s.log)
 	s.stopRateLimiter = stopRL
 	mc := middleware.MaxConcurrent(s.cfg.Server.MaxConcurrentBiometric)

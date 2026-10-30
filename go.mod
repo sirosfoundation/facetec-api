@@ -5,11 +5,13 @@ go 1.27.3
 require (
 	github.com/gin-gonic/gin v1.12.0
 	github.com/gmrtd/gmrtd v1.6.0
+	github.com/go-jose/go-jose/v4 v4.1.6
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/kelseyhightower/envconfig v1.4.0
 	github.com/mrjoshuak/go-jpeg2000 v1.5.12
 	github.com/prometheus/client_golang v1.25.0
 	github.com/sirosfoundation/go-spocp v0.1.0
+	github.com/sirosfoundation/go-tokenauth v0.5.0
 	github.com/sirosfoundation/go-trust v0.25.0
 	github.com/stretchr/testify v1.12.1
 	go.uber.org/zap v1.28.0

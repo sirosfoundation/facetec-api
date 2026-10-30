@@ -129,7 +129,8 @@ Three modes are selected automatically based on which keys are present:
 
 | Mode | Config keys | Behaviour |
 |------|------------|-----------|
-| **JWT** *(recommended)* | `jwt.secret` | Validates HMAC-signed JWTs. The `tenant_id` claim selects the per-tenant policy; tokens without it use the `default` tenant. |
+| **JWT via JWKS** *(recommended)* | `jwt.jwks_uri` | Verifies ES256/ES384/EdDSA JWTs against the issuer's published public keys. This service holds nothing that can mint a token. The `tenant_id` claim selects the per-tenant policy; tokens without it use the `default` tenant. |
+| **JWT via shared secret** | `jwt.secret` | Verifies HMAC-signed JWTs (HS256/384/512). Simpler, but the secret can also *issue* tokens, so both ends hold a forging key. Being migrated away from ([#12](https://github.com/sirosfoundation/facetec-api/issues/12)). |
 | **Legacy Bearer** | `security.app_key` (no JWT secret) | Constant-time comparison of a raw token. Single-tenant only. |
 | **Dev / unauthenticated** | neither set | All requests are accepted. **Never use in production.** |
 
@@ -137,12 +138,35 @@ JWT settings:
 
 | YAML key | Env variable | Default | Description |
 |----------|-------------|---------|-------------|
+| `jwt.jwks_uri` | `JWT_JWKS_URI` | *(empty)* | Issuer's JSON Web Key Set endpoint, e.g. `https://backend.siros.org/.well-known/jwks.json`. Must be `https` (plain `http` only for localhost) |
+| `jwt.jwks_refresh` | `JWT_JWKS_REFRESH` | `5m` | Interval of the background key set refresh |
 | `jwt.secret` | `JWT_SECRET` | *(empty)* | HMAC shared secret for HS256/384/512 |
 | `jwt.secret_path` | `JWT_SECRET_PATH` | *(optional)* | File containing the JWT secret |
-| `jwt.issuer` | `JWT_ISSUER` | *(empty)* | Expected `iss` claim; leave empty to skip validation |
+| `jwt.issuer` | `JWT_ISSUER` | *(empty)* | Expected `iss` claim. **Required** whenever `jwt.jwks_uri` or `jwt.secret` is set |
+| `jwt.audience` | `JWT_AUDIENCE` | *(empty)* | Accepted `aud` values — this service's own identifiers. **Required** whenever `jwt.jwks_uri` or `jwt.secret` is set |
 | `jwt.require_auth` | `JWT_REQUIRE_AUTH` | `false` | Reject requests without a valid JWT |
 | `security.app_key` | `SECURITY_APP_KEY` | *(optional)* | Legacy Bearer token (set directly or via `app_key_path`) |
 | `security.app_key_path` | `SECURITY_APP_KEY_PATH` | *(optional)* | File containing a legacy Bearer token |
+
+`jwt.jwks_uri` and `jwt.secret` may both be set during the migration: a token is verified by
+whichever matches its algorithm family, so ES256 tokens from the new issuer and HS256 tokens from
+the old one are both accepted while deployments roll over. Startup logs a warning while
+`jwt.secret` is still configured alongside `jwt.jwks_uri` — removing it completes the migration
+and leaves this service with no key capable of issuing a token.
+
+Token validation is [go-tokenauth](https://github.com/sirosfoundation/go-tokenauth), the shared
+SIROS library, rather than middleware of this service's own. The key set is fetched once at
+startup, refreshed in the background every `jwt.jwks_refresh`, and re-fetched on demand when a
+token presents an unknown `kid`, which is how key rotation at the issuer reaches a running
+process. On-demand re-fetching is rate-limited, because the `kid` in a token is
+attacker-controlled and an unthrottled refetch would make this service a load generator against
+the issuer. An unreachable key set fails closed: tokens are refused, never waved through.
+
+`jwt.audience` and `jwt.issuer` are mandatory in both JWT modes. go-tokenauth refuses to
+validate a token without an audience restriction or an expected issuer rather than skipping
+those checks, so a configuration missing either would start and then reject every request;
+startup refuses it instead. Audience binding is what stops a token minted for another service
+in the estate — correctly signed, unexpired, from the same issuer — being replayed here.
 | `security.rate_limit.enabled` | `SECURITY_RATE_LIMIT_ENABLED` | `true` | Enable per-IP rate limiting on biometric endpoints |
 | `security.rate_limit.requests_per_minute` | `SECURITY_RATE_LIMIT_RPM` | `10` | Per-IP rate limit on biometric endpoints |
 
@@ -477,8 +501,12 @@ configured thresholds are rejected or escalated.
 - **Security response headers.** `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`,
   `Cache-Control: no-store` on every response.
 - **HTTP timeouts.** `ReadHeaderTimeout: 10s`, `WriteTimeout: 90s`, `IdleTimeout: 120s`.
-- **Auth required.** Startup fails unless at least one of `jwt.secret` or `security.app_key`
-  is set.
+- **Auth required.** Startup fails unless at least one of `jwt.jwks_uri`, `jwt.secret` or
+  `security.app_key` is set.
+- **No algorithm confusion.** A token's signature is verified with a key from its own algorithm
+  family and no other: an ECDSA or Ed25519 token against a public key from the issuer's key set,
+  an HMAC token against the shared secret. Neither key is ever offered to the other family, so
+  the issuer's *published* public key cannot be used as an HMAC secret to forge a token.
 - **Atomic SIGHUP reload.** The tenant registry is swapped atomically on SIGHUP; in-flight
   requests are unaffected.
 
