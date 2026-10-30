@@ -26,14 +26,14 @@ technical and organisational measures (TOMs), and considerations relevant to GDP
 
 | Data element | Category | Where processed |
 |---|---|---|
-| **FaceScan** (base64, from mobile SDK) | Biometric data (Article 9(1)) | In transit: HTTPS to facetec-api → FaceTec Server |
-| **AuditTrail** images (base64, from mobile SDK) | Biometric data | In transit: HTTPS to facetec-api → FaceTec Server |
-| **FaceMap** (server-computed biometric template) | Biometric data | In process memory only — never persisted |
-| **Liveness score** (float, 0.0–1.0) | Derived biometric indicator | In process memory only; logged at `Info` level without the score value |
+| **FaceScan** (inside the SDK's opaque `requestBlob`) | Biometric data (Article 9(1)) | In transit only: relayed undecoded, HTTPS to facetec-api → FaceTec Server |
+| **AuditTrail** images (inside the `requestBlob`) | Biometric data | In transit only: relayed undecoded, HTTPS to facetec-api → FaceTec Server |
+| **FaceMap** (server-computed biometric template) | Biometric data | Never seen by facetec-api; derived and held by the FaceTec Server |
+| **Liveness verdict** (boolean) | Derived biometric indicator | In process memory only, keyed by tenant and `externalDatabaseRefID`; logged at `Info` level as a pass/fail |
 | **Face-match level** (integer, 0–10) | Derived biometric indicator | In process memory only; logged at `Debug` level only on policy rejection |
 | **Chip face-match level** (integer, 0–10, FaceTec `matchLevelNFCToFaceMap`) | Derived biometric indicator | In process memory; recorded as `chip_face_match_level` in the `credential_issued` audit event (`-1` when not reported). A refusal logs only whether a level was reported, not the level |
-| **ID scan image** (base64, from mobile SDK) | Biometric / documentary | In transit: HTTPS to facetec-api → FaceTec Server |
-| **ID front/back images** (base64) | Biometric / documentary | In transit: HTTPS to facetec-api → FaceTec Server |
+| **ID scan image** (inside the `requestBlob`) | Biometric / documentary | In transit only: relayed undecoded, HTTPS to facetec-api → FaceTec Server |
+| **ID front/back images** (inside the `requestBlob`) | Biometric / documentary | In transit only: relayed undecoded, HTTPS to facetec-api → FaceTec Server |
 
 ### 2.2 Ordinary personal data (Article 4(1) GDPR)
 
@@ -92,15 +92,15 @@ zeroing guarantees: restrict access and retention, and delete them after debuggi
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │  facetec-api                                                                │
 │                                                                             │
-│  POST /v1/liveness                                                          │
-│    ① Forwards FaceScan + AuditTrail ──────────────────────────────────────► FaceTec Server
-│    ② Receives FaceMap (biometric template) ◄──────────────────────────────
-│    ③ Stores FaceMap in RAM only (TTL = 2 min, one-time-use)                │
+│  POST /process-request  (once per session step: face, document, chip)       │
+│    ① Forwards the SDK's opaque requestBlob ───────────────────────────────► FaceTec Server
+│    ② Receives the opaque responseBlob ◄───────────────────────────────────
+│    ③ Records only the liveness verdict (a boolean) in RAM for the session   │
+│    ④ Returns the responseBlob to the SDK unchanged                          │
 │                                                                             │
-│  POST /v1/id-scan                                                           │
-│    ④ Forwards ID scan + FaceMap from RAM ─────────────────────────────────► FaceTec Server
-│    ⑤ Receives DocumentData + face-match level ◄───────────────────────────
-│    ⑥ FaceMap bytes zeroed (clear()) immediately                             │
+│  On the session's final step (photo-ID match complete):                     │
+│    ⑤ Reads DocumentData + match levels out of the responseBlob             │
+│    ⑥ Verifies the chip (SOD, data-group hashes, DSC trust) when present    │
 │    ⑦ DocumentData evaluated against SPOCP policy                           │
 │    ⑧ MRZ lines stripped from DocumentData                                  │
 │    ⑨ Stripped DocumentData forwarded ─────────────────────────────────────► VC Issuer (REST)
@@ -111,18 +111,22 @@ zeroing guarantees: restrict access and retention, and delete them after debuggi
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
+Biometric capture data (the FaceScan, the AuditTrail images and the live FaceMap the
+FaceTec Server derives from them) stays inside the opaque blobs exchanged between the
+SDK and the FaceTec Server. facetec-api relays those blobs without decoding them and
+retains nothing derived from a face.
+
 **Data that leaves facetec-api:**
 
 | Destination | Data sent |
 |---|---|
-| FaceTec Server (HTTPS) | FaceScan, AuditTrail, ID scan images, FaceMap (from RAM); all raw biometric data |
+| FaceTec Server (HTTPS) | The SDK's opaque `requestBlob`, relayed unchanged — it carries the FaceScan, AuditTrail and ID scan images, i.e. all raw biometric data |
 | VC Issuer (apigw REST, HTTPS) | DocumentData minus MRZ lines: name, DoB, nationality, sex, doc number, doc type, expiry, issuing country |
 | Mobile wallet / client | Signed verifiable credential (opaque token; content determined by issuer) |
 
 **Data that never leaves facetec-api:**
 
-- FaceMap (biometric template) — only forwarded to FaceTec Server, never to issuer or client
-- Liveness score — internal only
+- Liveness verdict — internal only
 - Face-match level — internal only; logged at `Debug` level on rejection
 - Chip face-match level — never sent to the issuer or client; recorded in the `credential_issued` audit event only
 - MRZ lines — stripped in code (`issueCredential()`) before any forwarding
@@ -133,8 +137,6 @@ zeroing guarantees: restrict access and retention, and delete them after debuggi
 
 | Data | Storage location | Maximum retention | Deletion mechanism |
 |---|---|---|---|
-| FaceMap bytes | Process RAM (`session.Manager.liveness`) | `session.liveness_ttl` (default **2 min**) | `clear()` on use; TTL eviction; `clear()` on `Manager.Close()` |
-| Liveness score | Process RAM | Same as FaceMap | Same |
 | Liveness verdict of a `/process-request` session (a boolean, keyed by tenant and `externalDatabaseRefID`) | Process RAM (`session.Manager.proofs`) | `session.liveness_proof_ttl` (default **15 min**) | Deleted on use at the session's final result; TTL eviction |
 | Signed credential | Process RAM (`session.Manager.offers`) | `session.offer_ttl` (default **5 min**) | Deleted atomically on first `GET /v1/offer/:txid`; TTL eviction |
 | Request logs | Log sink (operator-configured) | Operator's log retention policy | No personal data in log fields; see §2.3 |
@@ -142,8 +144,9 @@ zeroing guarantees: restrict access and retention, and delete them after debuggi
 | Audit log event (`credential_issued`) | Log sink | Operator's log retention policy | Contains: tenant ID, transaction ID, doc type, format, scope, chip trust outcome and reason code, FaceTec `chip_auth_status`, the chip face-match level (`chip_face_match_level`, an integer 0–10), DSC/CSCA certificate fingerprints — **no name, MRZ, image or biometric template** (the SOD signing time is not logged). The chip face-match level is a derived biometric indicator, kept as evidence that the gate passed; it identifies no one on its own |
 
 > **Note:** facetec-api has no database and no persistent storage of any kind. All data described
-> above is held exclusively in process heap memory. A process restart or graceful shutdown
-> zeroes and frees all biometric data.
+> above is held exclusively in process heap memory, and none of it is a biometric template: the
+> only per-session state is a boolean liveness verdict and the signed credential awaiting pickup.
+> A process restart or graceful shutdown frees both.
 
 ---
 
@@ -153,7 +156,8 @@ zeroing guarantees: restrict access and retention, and delete them after debuggi
 
 FaceTec operates the server-side biometric matching engine. When using FaceTec's hosted service:
 
-- The FaceTec Server receives: FaceScan, AuditTrail, ID scan images, FaceMap.
+- The FaceTec Server receives the SDK's `requestBlob`, which carries the FaceScan,
+  AuditTrail and ID scan images, and derives the FaceMap itself.
 - These are Article 9 special-category biometric data.
 - FaceTec Inc. acts as a **processor** (or possibly joint controller — legal analysis required).
 - A **Data Processing Agreement (DPA)** with FaceTec must be in place before processing
@@ -259,12 +263,11 @@ The following technical controls are implemented in code:
 | Control | Implementation |
 |---|---|
 | **Data minimisation** | Only fields required for credential issuance are extracted from OCR output. MRZ lines (containing full identity in machine-readable form) are stripped before forwarding. |
-| **Storage limitation** | Biometric data is never written to disk. RAM retention is bounded by configurable short TTLs with fallback eviction. |
-| **Explicit zeroing** | `clear(faceMap)` is called on the `[]byte` FaceMap immediately after use (deferred in `SubmitIDScan`), and again by `Manager.Close()` on every in-memory entry at shutdown. |
+| **Storage limitation** | Biometric data is never written to disk, and no biometric template is ever held: the only per-session state is a boolean liveness verdict, bounded by a configurable short TTL with fallback eviction. |
 | **No body logging** | Gin middleware never logs request or response bodies. The panic-recovery handler is bound to `nil` to prevent biometric data appearing in crash dumps. |
 | **Structured logs scrubbed** | Log fields are explicitly enumerated: method, path, status, latency, IP, user-agent. The field set is the same whether `logging.format` is `console` or `json`; the format changes the encoding only. Biometric scores are absent from Info-level logs, except the chip face-match level in the `credential_issued` audit event (§2.1), which records the evidence for the chip photo gate. |
 | **Sensitive debug opt-in** | Document identity fields are excluded by default even at Debug level. `logging.include_pii` enables the development-only exception with a startup warning; portraits and raw biometric data remain excluded (§2.4). |
-| **One-time-use sessions** | Liveness entries and credential offers are deleted on first access (`TakeLiveness`, `TakeOffer`). An attacker cannot replay a session ID. |
+| **One-time-use sessions** | Liveness verdicts and credential offers are deleted on first access (`TakeLivenessProof`, `TakeOffer`). An attacker cannot replay a session ID. |
 | **Rate limiting** | Biometric endpoints are rate-limited per source IP to slow automated bulk enumeration or scraping. |
 | **Short-lived sessions** | Default TTL of 2 min for liveness sessions limits the exposure window if a session ID is intercepted. |
 | **Audit trail without PII** | The `AUDIT credential_issued` log event records tenant ID, transaction ID, doc type, credential format, scope, the chip trust outcome and reason code, FaceTec `chip_auth_status` and the DSC/CSCA certificate fingerprints — no name, date of birth, or other identity fields. |
@@ -285,7 +288,7 @@ The following is a template RoPA entry for the controller to complete.
 | **Purpose** | Verify that a natural person is live and matches a government-issued identity document; issue a verifiable credential attesting to verified identity fields |
 | **Legal basis** | *(to be completed by DPO — see §6)* |
 | **Data subjects** | Natural persons who voluntarily initiate an identity verification session |
-| **Data categories** | Biometric data (liveness scan, ID scan images, FaceMap); identity fields extracted from document (name, DoB, nationality, sex, doc number, doc type) |
+| **Data categories** | Biometric data relayed undecoded to the FaceTec Server (liveness scan, ID scan images); identity fields extracted from document (name, DoB, nationality, sex, doc number, doc type) |
 | **Recipients** | FaceTec Server (biometric engine); VC Issuer service (identity fields minus MRZ); data subject's wallet (signed credential) |
 | **Third country transfers** | Dependent on where FaceTec Server and VC Issuer are hosted. If FaceTec hosted service is used, transfer to USA — adequacy decision or SCCs required. |
 | **Retention** | In-memory only; ≤ 5 min maximum; zeroed on use |
@@ -317,8 +320,9 @@ Key items a DPIA must address for this service:
 6. **Cross-border transfer:** If FaceTec's hosted service is used, biometric data is transferred
    to the United States. An adequacy decision (if any) or Standard Contractual Clauses must be in
    place. A Transfer Impact Assessment (TIA) is recommended.
-7. **Incident response:** Because facetec-api holds no persistent data, a breach of the running
-   process leaks at most one 2-minute FaceMap. The incident response plan should reflect this
+7. **Incident response:** Because facetec-api holds no persistent data and no biometric template,
+   a breach of the running process leaks at most the document fields of scans in flight and
+   credentials awaiting pickup (5-minute TTL). The incident response plan should reflect this
    bounded exposure.
 8. **Residual risks:** Even with the mitigations in §8, the FaceTec Server and VC Issuer
    potentially store data. Their retention and security practices must be independently assessed.

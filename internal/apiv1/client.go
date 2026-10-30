@@ -10,9 +10,11 @@
 //  4. VC apigw REST client — uploads document data and triggers credential
 //     offer generation once policy passes.
 //
-// All biometric data (FaceMap templates, raw scan images) is held exclusively
-// in an in-memory session store ([session.Manager]) and is never written to disk.
-// FaceMap bytes are explicitly zeroed with clear() after use and on shutdown.
+// Biometric data (FaceScans, FaceMap templates, raw scan images) never enters
+// this service: FaceTec 10's process-request exchange carries opaque blobs
+// between the SDK and the FaceTec Server, and only the OCR and chip fields of
+// the finished scan are read out of the response. Nothing biometric is stored
+// in [session.Manager] or written to disk.
 package apiv1
 
 import (
@@ -64,7 +66,7 @@ func New(_ context.Context, cfg *config.Config, registry *tenant.Registry, log *
 		ftHTTPClient,
 	)
 
-	ses := session.New(cfg.Session.LivenessTTL, cfg.Session.OfferTTL, cfg.Session.LivenessProofTTL)
+	ses := session.New(cfg.Session.OfferTTL, cfg.Session.LivenessProofTTL)
 
 	log.Info("connecting to vc issuer", zap.String("addr", cfg.Issuer.Addr))
 	issuer, err := issuerclient.New(issuerclient.Config{
@@ -104,169 +106,6 @@ func warnIfTrustNotRequired(cfg *config.Config, log *zap.Logger) {
 	log.Warn("SECURITY: trust.required is false — document-signer trust is NOT enforced and " +
 		"identity claims read by OCR from the printed page can reach an issued credential. " +
 		"Development and test stacks only; a production build refuses this setting")
-}
-
-// GetSessionToken proxies a session-token request to the FaceTec Server.
-func (c *Client) GetSessionToken(ctx context.Context) (*facetec.SessionTokenResponse, error) {
-	resp, err := c.ft.GetSessionToken(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("get session token: %w", err)
-	}
-	return resp, nil
-}
-
-// SubmitLiveness forwards a FaceScan to the FaceTec Server, validates that liveness
-// passed, stores the FaceMap as a []byte in an in-memory session, and returns an opaque
-// session ID. The FaceMap is converted to []byte immediately after receipt so the
-// backing array can be zeroed with clear() in the subsequent id-scan step.
-func (c *Client) SubmitLiveness(ctx context.Context, req *facetec.LivenessCheckRequest) (string, error) {
-	result, err := c.ft.SubmitLiveness(ctx, req)
-	if err != nil {
-		return "", fmt.Errorf("liveness: facetec server: %w", err)
-	}
-	if !result.Success {
-		return "", idverrors.New(idverrors.CodeLivenessFailed, "liveness check did not pass")
-	}
-
-	// Convert to []byte immediately so the backing array can be explicitly zeroed later.
-	// Note: the original string from JSON unmarshalling cannot be zeroed by the Go runtime;
-	// this copy is the one that will be cleared.
-	faceMapBytes := []byte(result.FaceMap)
-	result.FaceMap = "" // drop string reference
-
-	livenessSessionID, err := c.sessions.PutLiveness(faceMapBytes, result.LivenessScore)
-	if err != nil {
-		clear(faceMapBytes)
-		return "", fmt.Errorf("liveness: store face map: %w", err)
-	}
-
-	c.log.Info("liveness check accepted",
-		zap.Float64("score", result.LivenessScore),
-	)
-	return livenessSessionID, nil
-}
-
-// SubmitIDScan performs the photo ID scan flow:
-//  1. Retrieves and consumes the in-memory FaceMap ([]byte) for livenessSessionID.
-//  2. Forwards the combined request to the FaceTec Server (FaceMap converted to string for JSON).
-//  3. Immediately zeros the FaceMap bytes via defer.
-//  4. Rejects outright if NFC wasn't verified (see the NFCVerified check below).
-//  5. Evaluates the combined ScanResult against numeric thresholds and tenant policy.
-//  6. On policy pass, issues a credential using the configured issuer client flow.
-//  7. Returns the issued document ID and credential offer URL.
-func (c *Client) SubmitIDScan(ctx context.Context, livenessSessionID string, idScanReq *facetec.IDScanRequest) (string, string, error) {
-	lv, err := c.sessions.TakeLiveness(livenessSessionID)
-	if err != nil {
-		return "", "", idverrors.Newf(idverrors.CodeSessionExpired, "liveness session expired or not found: %v", err)
-	}
-	// Zero the FaceMap bytes on return regardless of outcome (P1).
-	defer clear(lv.FaceMap)
-
-	idScanReq.FaceMap = string(lv.FaceMap) // convert []byte → string for JSON serialization
-	idScanResult, err := c.ft.SubmitIDScan(ctx, idScanReq)
-	idScanReq.FaceMap = "" // drop string reference immediately after the call
-
-	if err != nil {
-		return "", "", fmt.Errorf("id-scan: facetec server: %w", err)
-	}
-	if !idScanResult.Success {
-		return "", "", idverrors.New(idverrors.CodeMatchFailed, "document scan or face-match did not pass")
-	}
-
-	scanResult := facetec.ScanResult{
-		Liveness: facetec.LivenessCheckResult{
-			Success:       true,
-			LivenessScore: lv.LivenessScore,
-		},
-		IDScan: *idScanResult,
-	}
-
-	tc, ok := tenant.FromStdContext(ctx)
-	if !ok {
-		return "", "", fmt.Errorf("id-scan: tenant context missing from request")
-	}
-
-	c.logDocumentData("id-scan document data", tc.ID, idScanResult.DocumentData)
-
-	// Same hard gate as ProcessRequest's nfcRejection check, adapted to this
-	// legacy path's response shape. FaceTec's /match-3d-3d response (decoded
-	// directly into IDScanResult) only carries a plain NFCVerified bool, with
-	// no equivalent to /process-request's nfcStatusEnumInt that would let us
-	// distinguish "skipped" from "attempted and failed" -- so both are
-	// treated as not meeting the required assurance level. Without this,
-	// /v1/liveness + /v1/id-scan would be a way to issue credentials that
-	// completely bypasses the NFC requirement enforced on /process-request.
-	if !idScanResult.NFCVerified {
-		c.log.Info("id-scan scan rejected: NFC not verified",
-			zap.String("tenant", tc.ID),
-			zap.String("doc_type", idScanResult.DocumentData.DocumentType),
-		)
-		return "", "", idverrors.New(idverrors.CodeNFCSkipped, "NFC verification was skipped or failed")
-	}
-
-	// The legacy response carries no raw chip data, so chip-trusted is always
-	// false here. Because NFCVerified (required above) counts as chip
-	// evidence, trust.required hard-rejects this path in assessChip; with
-	// trust.required off, policy rules that demand chip-trusted reject it.
-	if rej := c.assessChip(ctx, &scanResult); rej != nil {
-		c.log.Info("id-scan scan rejected: chip check",
-			zap.String("tenant", tc.ID), zap.String("reason", scanResult.IDScan.ChipTrustReason))
-		return "", "", rej
-	}
-
-	// This path never carries raw chip data, so there is no verified chip
-	// identity to issue from and the gate refuses every scan reaching it
-	// (#85). That is the intended outcome, not a regression: the legacy split
-	// API cannot satisfy the rule that only chip-verified claims are issued.
-	if rej := c.verifiedIdentityRejection(scanResult.IDScan); rej != nil {
-		c.log.Info("id-scan scan rejected: no verified chip identity",
-			zap.String("tenant", tc.ID),
-			zap.String("doc_type", scanResult.IDScan.DocumentData.DocumentType),
-		)
-		return "", "", rej
-	}
-
-	if code, msg, rejected := chipFaceRejection(*idScanResult, c.cfg.FaceTec.MinChipFaceMatchLevel); rejected {
-		c.log.Info("id-scan scan rejected: chip photo match",
-			zap.String("tenant", tc.ID),
-			zap.String("doc_type", idScanResult.DocumentData.DocumentType),
-			zap.Bool("chip_face_match_reported", idScanResult.ChipFaceMatchLevel != nil),
-		)
-		return "", "", idverrors.New(code, msg)
-	}
-
-	if code, msg, rejected := documentExpiryRejection(idScanResult.DocumentData, time.Now()); rejected {
-		c.log.Info("id-scan scan rejected: document expiry",
-			zap.String("tenant", tc.ID),
-			zap.String("doc_type", idScanResult.DocumentData.DocumentType),
-			zap.String("code", string(code)),
-		)
-		return "", "", idverrors.New(code, msg)
-	}
-
-	if err := tc.Policy.EvaluateScan(scanResult); err != nil {
-		c.log.Debug("scan rejected by policy",
-			zap.String("tenant", tc.ID),
-			zap.String("doc_type", idScanResult.DocumentData.DocumentType),
-			zap.Int("face_match_level", idScanResult.FaceMatchLevel),
-		)
-		return "", "", idverrors.Newf(idverrors.CodePolicyRejected, "scan rejected by policy: %v", err)
-	}
-
-	docID, offerURL, err := c.issueCredential(ctx, scanResult, tc.Issuer)
-	if err != nil {
-		return "", "", idverrors.Newf(idverrors.CodeIssuanceFailed, "credential issuance failed: %v", err)
-	}
-
-	// P6: structured audit record — no biometric or PII fields.
-	c.log.Info("AUDIT credential_issued", append([]zap.Field{
-		zap.String("tenant", tc.ID),
-		zap.String("document_id", docID),
-		zap.String("doc_type", idScanResult.DocumentData.DocumentType),
-		zap.String("format", tc.Issuer.Format),
-		zap.String("scope", tc.Issuer.Scope),
-	}, chipAuditFields(scanResult.IDScan)...)...)
-	return docID, offerURL, nil
 }
 
 // ProcessRequest proxies FaceTec's requestBlob/responseBlob exchange and, when

@@ -35,64 +35,11 @@ type stubApiv1 struct {
 	mu sync.Mutex
 
 	// Configurable return values.
-	sessionTokenResp *facetec.SessionTokenResponse
-	sessionTokenErr  error
-
-	livenessID  string
-	livenessErr error
-
-	idScanID       string
-	idScanOfferURL string
-	idScanErr      error
-
 	processResp *facetec.ProcessRequestResponse
 	processErr  error
 
 	redeemEntry *session.OfferEntry
 	redeemErr   error
-}
-
-func (s *stubApiv1) GetSessionToken(_ context.Context) (*facetec.SessionTokenResponse, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.sessionTokenErr != nil {
-		return nil, s.sessionTokenErr
-	}
-	resp := s.sessionTokenResp
-	if resp == nil {
-		resp = &facetec.SessionTokenResponse{SessionToken: "test-token"}
-	}
-	return resp, nil
-}
-
-func (s *stubApiv1) SubmitLiveness(_ context.Context, _ *facetec.LivenessCheckRequest) (string, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.livenessErr != nil {
-		return "", s.livenessErr
-	}
-	id := s.livenessID
-	if id == "" {
-		id = "liveness-session-id"
-	}
-	return id, nil
-}
-
-func (s *stubApiv1) SubmitIDScan(_ context.Context, _ string, _ *facetec.IDScanRequest) (string, string, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.idScanErr != nil {
-		return "", "", s.idScanErr
-	}
-	id := s.idScanID
-	if id == "" {
-		id = "offer-tx-id"
-	}
-	offerURL := s.idScanOfferURL
-	if offerURL == "" {
-		offerURL = "openid-credential-offer://?credential_offer_uri=https://issuer.example.com/credential-offer/test-uuid"
-	}
-	return id, offerURL, nil
 }
 
 func (s *stubApiv1) ProcessRequest(_ context.Context, _ *facetec.ProcessRequestRequest) (*facetec.ProcessRequestResponse, error) {
@@ -145,8 +92,7 @@ func testConfig(appKey string, rateLimitEnabled bool) *config.Config {
 			Port: 0,
 		},
 		Session: config.SessionConfig{
-			LivenessTTL: 2 * time.Minute,
-			OfferTTL:    5 * time.Minute,
+			OfferTTL: 5 * time.Minute,
 		},
 		Security: config.SecurityConfig{
 			AppKey: appKey,
@@ -303,30 +249,6 @@ func TestHealth_NoAuth_OK(t *testing.T) {
 // Session token endpoint
 // ----------------------------------------------------------------------------
 
-func TestSessionToken_Success(t *testing.T) {
-	stub := &stubApiv1{
-		sessionTokenResp: &facetec.SessionTokenResponse{SessionToken: "tok123"},
-	}
-	ts := newTestServer(t, stub, "")
-	resp := postJSON(t, ts, "/v1/session-token", nil, "")
-	assertStatus(t, resp, http.StatusOK)
-
-	var body map[string]string
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		t.Fatalf("decode body: %v", err)
-	}
-	if body["sessionToken"] != "tok123" {
-		t.Errorf("sessionToken: got %q, want %q", body["sessionToken"], "tok123")
-	}
-}
-
-func TestSessionToken_BackendError_502(t *testing.T) {
-	stub := &stubApiv1{sessionTokenErr: errors.New("server down")}
-	ts := newTestServer(t, stub, "")
-	resp := postJSON(t, ts, "/v1/session-token", nil, "")
-	assertStatus(t, resp, http.StatusBadGateway)
-}
-
 // ----------------------------------------------------------------------------
 // FaceTec process-request endpoint
 // ----------------------------------------------------------------------------
@@ -409,79 +331,9 @@ func TestProcessRequest_BackendError_502(t *testing.T) {
 // Liveness endpoint
 // ----------------------------------------------------------------------------
 
-func TestLiveness_Success(t *testing.T) {
-	stub := &stubApiv1{livenessID: "lsid-abc"}
-	ts := newTestServer(t, stub, "")
-
-	body := map[string]string{
-		"sessionToken": "tok",
-		"faceScan":     "base64data",
-	}
-	resp := postJSON(t, ts, "/v1/liveness", body, "")
-	assertStatus(t, resp, http.StatusOK)
-
-	var rBody map[string]string
-	if err := json.NewDecoder(resp.Body).Decode(&rBody); err != nil {
-		t.Fatalf("decode body: %v", err)
-	}
-	if rBody["livenessSessionId"] != "lsid-abc" {
-		t.Errorf("livenessSessionId: got %q, want %q", rBody["livenessSessionId"], "lsid-abc")
-	}
-}
-
-func TestLiveness_MissingBody_400(t *testing.T) {
-	ts := newTestServer(t, &stubApiv1{}, "")
-	// Empty body — missing required fields.
-	resp := postJSON(t, ts, "/v1/liveness", map[string]string{}, "")
-	assertStatus(t, resp, http.StatusBadRequest)
-}
-
-func TestLiveness_ServiceError_422(t *testing.T) {
-	stub := &stubApiv1{livenessErr: errors.New("liveness failed")}
-	ts := newTestServer(t, stub, "")
-
-	body := map[string]string{"sessionToken": "tok", "faceScan": "data"}
-	resp := postJSON(t, ts, "/v1/liveness", body, "")
-	assertStatus(t, resp, http.StatusUnprocessableEntity)
-}
-
 // ----------------------------------------------------------------------------
 // ID scan endpoint
 // ----------------------------------------------------------------------------
-
-func TestIDScan_Success(t *testing.T) {
-	stub := &stubApiv1{idScanID: "offer-tx-1"}
-	ts := newTestServer(t, stub, "")
-
-	body := map[string]string{
-		"sessionToken":      "tok",
-		"livenessSessionId": "lsid",
-		"idScan":            "scandata",
-	}
-	resp := postJSON(t, ts, "/v1/id-scan", body, "")
-	assertStatus(t, resp, http.StatusOK)
-
-	var rBody map[string]string
-	if err := json.NewDecoder(resp.Body).Decode(&rBody); err != nil {
-		t.Fatalf("decode body: %v", err)
-	}
-	if rBody["transactionId"] != "offer-tx-1" {
-		t.Errorf("transactionId: got %q, want %q", rBody["transactionId"], "offer-tx-1")
-	}
-}
-
-func TestIDScan_ServiceError_422(t *testing.T) {
-	stub := &stubApiv1{idScanErr: errors.New("policy rejected")}
-	ts := newTestServer(t, stub, "")
-
-	body := map[string]string{
-		"sessionToken":      "tok",
-		"livenessSessionId": "lsid",
-		"idScan":            "scandata",
-	}
-	resp := postJSON(t, ts, "/v1/id-scan", body, "")
-	assertStatus(t, resp, http.StatusUnprocessableEntity)
-}
 
 // ----------------------------------------------------------------------------
 // Offer redemption endpoint
@@ -522,22 +374,19 @@ func TestRateLimit_BiometricEndpoint(t *testing.T) {
 	stub := &stubApiv1{}
 	ts := newTestServerWithRateLimit(t, stub, "")
 
-	body := map[string]string{
-		"sessionToken": "tok",
-		"faceScan":     "data",
-	}
+	body := map[string]string{"requestBlob": "opaque"}
 
 	// The rate limit is 2 rpm. The first two requests should succeed;
 	// the third should be rate-limited.
 	for i := 0; i < 2; i++ {
-		resp := postJSON(t, ts, "/v1/liveness", body, "")
+		resp := postJSON(t, ts, "/v1/process-request", body, "")
 		if resp.StatusCode != http.StatusOK {
 			t.Errorf("request %d: got %d, want 200", i+1, resp.StatusCode)
 		}
 		resp.Body.Close()
 	}
 
-	resp := postJSON(t, ts, "/v1/liveness", body, "")
+	resp := postJSON(t, ts, "/v1/process-request", body, "")
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusTooManyRequests {
 		t.Errorf("third request: got %d, want 429", resp.StatusCode)
@@ -550,9 +399,11 @@ func TestRateLimit_BiometricEndpoint(t *testing.T) {
 
 func TestFullFlow(t *testing.T) {
 	stub := &stubApiv1{
-		sessionTokenResp: &facetec.SessionTokenResponse{SessionToken: "ft-tok"},
-		livenessID:       "lsid-flow",
-		idScanID:         "tx-flow",
+		processResp: &facetec.ProcessRequestResponse{
+			Payload:            map[string]any{"responseBlob": "response-blob"},
+			TransactionID:      "tx-flow",
+			CredentialOfferURL: "openid-credential-offer://tx-flow",
+		},
 		redeemEntry: &session.OfferEntry{
 			Credentials: []string{"issued-credential"},
 			Scope:       "photo-id",
@@ -560,49 +411,15 @@ func TestFullFlow(t *testing.T) {
 	}
 	ts := newTestServer(t, stub, "")
 
-	// Step 1: Get session token.
-	tokenResp := postJSON(t, ts, "/v1/session-token", nil, "")
-	assertStatus(t, tokenResp, http.StatusOK)
-	var tokenBody struct {
-		SessionToken string `json:"sessionToken"`
-	}
-	if err := json.NewDecoder(tokenResp.Body).Decode(&tokenBody); err != nil {
-		t.Fatalf("decode session-token response: %v", err)
-	}
-	tokenResp.Body.Close()
-
-	// Step 2: Submit liveness.
-	livBody := map[string]string{
-		"sessionToken": tokenBody.SessionToken,
-		"faceScan":     "fakescan",
-	}
-	livResp := postJSON(t, ts, "/v1/liveness", livBody, "")
-	assertStatus(t, livResp, http.StatusOK)
-	var livRespBody struct {
-		LivenessSessionID string `json:"livenessSessionId"`
-	}
-	if err := json.NewDecoder(livResp.Body).Decode(&livRespBody); err != nil {
-		t.Fatalf("decode liveness response: %v", err)
-	}
-	livResp.Body.Close()
-	if livRespBody.LivenessSessionID == "" {
-		t.Fatal("expected non-empty livenessSessionId")
-	}
-
-	// Step 3: Submit ID scan.
-	scanBody := map[string]string{
-		"sessionToken":      tokenBody.SessionToken,
-		"livenessSessionId": livRespBody.LivenessSessionID,
-		"idScan":            "fakeidscan",
-	}
-	scanResp := postJSON(t, ts, "/v1/id-scan", scanBody, "")
+	// Step 1: the SDK's final process-request returns the credential offer.
+	scanResp := postJSON(t, ts, "/v1/process-request", map[string]string{"requestBlob": "opaque"}, "")
 	assertStatus(t, scanResp, http.StatusOK)
 	var scanRespBody struct {
 		TransactionID      string `json:"transactionId"`
 		CredentialOfferURI string `json:"credentialOfferURI"`
 	}
 	if err := json.NewDecoder(scanResp.Body).Decode(&scanRespBody); err != nil {
-		t.Fatalf("decode id-scan response: %v", err)
+		t.Fatalf("decode process-request response: %v", err)
 	}
 	scanResp.Body.Close()
 	if scanRespBody.TransactionID == "" {
@@ -612,7 +429,7 @@ func TestFullFlow(t *testing.T) {
 		t.Fatal("expected non-empty credentialOfferURI")
 	}
 
-	// Step 4: Redeem offer.
+	// Step 2: the wallet redeems the offer.
 	offerResp := getJSON(t, ts, fmt.Sprintf("/v1/offer/%s", scanRespBody.TransactionID), "")
 	assertStatus(t, offerResp, http.StatusOK)
 	var offerBody struct {

@@ -10,14 +10,11 @@ The facetec SDK will be integrated into the native app frontend of go-wallet-bac
 
 Privacy is the primary concern. No biometric data will ever be stored on disk and every measure should be taken to make the attack surface of biometric data as small as possible. Biometrics will only be kept for as long as is absolutely necessary to complete a full scan+document validation flow. The facetec webservice (this project) should be treated as a separate security zone and communicates with the vc issuer over the apigw REST API (originally specified as gRPC). 
 
-The preferred mobile integration is FaceTec's `SessionRequestProcessor` pattern. The native app
+The mobile integration is FaceTec's `SessionRequestProcessor` pattern. The native app
 submits `requestBlob` to facetec-api `/process-request`; facetec-api forwards it to FaceTec Server
 and returns the upstream `responseBlob` unchanged. When the upstream result represents a successful
 photo-ID match and local policy accepts it, facetec-api also returns a `transactionId` and
 `credentialOfferURI` that the calling application can pass into the wallet's OpenID4VCI flow.
-
-The legacy split API (`/v1/session-token`, `/v1/liveness`, `/v1/id-scan`) remains available for
-clients that have not yet moved to the preferred `requestBlob`/`responseBlob` contract.
 
 The facetec webservice is responsible for business logic for
 

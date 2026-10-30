@@ -98,12 +98,8 @@ func NewQueue(ttl time.Duration) *Queue {
 }
 
 // Submit adds a scan result to the review queue.
-// Sensitive fields (FaceMap, SessionTokenUsed) are cleared before storage to
-// prevent accidental retention of biometric data or session tokens.
+// ScanResult carries no biometric templates, so there is nothing to strip.
 func (q *Queue) Submit(sessionID, tenantID string, result facetec.ScanResult) {
-	// Sanitize: never retain biometric templates or session tokens in the review queue.
-	result.Liveness.FaceMap = ""
-	result.Liveness.SessionTokenUsed = ""
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	now := time.Now()
