@@ -216,6 +216,40 @@ func TestMetrics_ReturnsPrometheusFormat(t *testing.T) {
 	}
 }
 
+// TestMetrics_ExposesDocumentedHTTPSeries pins the two series the README's
+// Prometheus Metrics table promises a scraper will find. The table previously
+// listed facetec_* IPV series built by an internal/metrics package that
+// nothing ever constructed, so every one of them was absent from a real
+// scrape; asserting the documented names keeps the table and the endpoint
+// from drifting apart again.
+func TestMetrics_ExposesDocumentedHTTPSeries(t *testing.T) {
+	ts := newTestServer(t, &stubApiv1{}, "")
+
+	// The middleware skips /metrics and the probe endpoints, so a recorded
+	// route has to be hit before either series is registered.
+	assertStatus(t, getJSON(t, ts, "/v1/health", ""), http.StatusOK)
+
+	resp := getJSON(t, ts, "/metrics", "")
+	assertStatus(t, resp, http.StatusOK)
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+
+	// Match the whole TYPE line rather than the bare name: a substring search
+	// for "..._requests_total" also matches a renamed "..._requests_total_x",
+	// and the line pins the metric type the README's table states as well.
+	for name, kind := range map[string]string{
+		"sirosid_facetec_http_requests_total":           "counter",
+		"sirosid_facetec_http_request_duration_seconds": "histogram",
+	} {
+		want := "# TYPE " + name + " " + kind + "\n"
+		if !strings.Contains(string(body), want) {
+			t.Errorf("/metrics does not expose %s as a %s, which the README documents", name, kind)
+		}
+	}
+}
+
 // ----------------------------------------------------------------------------
 // Auth middleware tests
 // ----------------------------------------------------------------------------

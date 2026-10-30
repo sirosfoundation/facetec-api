@@ -9,7 +9,6 @@ require (
 	github.com/kelseyhightower/envconfig v1.4.0
 	github.com/mrjoshuak/go-jpeg2000 v1.5.12
 	github.com/prometheus/client_golang v1.25.0
-	github.com/prometheus/client_model v0.6.3
 	github.com/sirosfoundation/go-spocp v0.1.0
 	github.com/sirosfoundation/go-trust v0.25.0
 	github.com/stretchr/testify v1.12.1
@@ -41,6 +40,7 @@ require (
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/osanderson/brainpool v1.0.0 // indirect
 	github.com/pelletier/go-toml/v2 v2.4.3 // indirect
+	github.com/prometheus/client_model v0.6.3 // indirect
 	github.com/prometheus/common v0.72.0 // indirect
 	github.com/prometheus/procfs v0.22.0 // indirect
 	github.com/quic-go/qpack v0.6.0 // indirect
