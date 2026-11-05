@@ -86,8 +86,8 @@ github.com/quic-go/quic-go v0.63.0 h1:LIFGHI4PFUhhw2dDD1ARHdCff143ffMHwZtbnbuJ78
 github.com/quic-go/quic-go v0.63.0/go.mod h1:RAro2j2yN9a9EiPACLHT9IB2NXCvGQmmo/alT0yYI0w=
 github.com/sirosfoundation/go-spocp v0.1.0 h1:fH/jrSHS8vc+KfAzJmq3fE9OH69ShRgL7G1ihb9FCPs=
 github.com/sirosfoundation/go-spocp v0.1.0/go.mod h1:a6WtxG5hnsUzcqUt5iHmSMvyX4PLUPMDFK7FLoDMSMs=
-github.com/sirosfoundation/go-tokenauth v0.5.0 h1:1H6+8sY1Lml8NBYIBlqDU7kwyUQs4Fg8eatLNR6f1bc=
-github.com/sirosfoundation/go-tokenauth v0.5.0/go.mod h1:izNosGOxPYolz81vWy+IuItQ9TIm1lSFxVib7HMLw4c=
+github.com/sirosfoundation/go-tokenauth v0.6.0 h1:vLUiNihAHV2iez0MfYTXa37EgPQi30I0EIEQZ1XWZh0=
+github.com/sirosfoundation/go-tokenauth v0.6.0/go.mod h1:s57re2/pPqYEwoOFUtbOic8m8XBWlgth2cbJ0YI21zU=
 github.com/sirosfoundation/go-trust v0.25.0 h1:8ooiAy7jEF3GfXxZoZo5nI7P1a9w53XRjXqUNBC3OpE=
 github.com/sirosfoundation/go-trust v0.25.0/go.mod h1:/bfPbXR7fnNM4lBRYmWQRgqHutGfX6wuRlsj1CeB0eg=
 github.com/stretchr/objx v0.1.0/go.mod h1:HFkY916IF+rwdDfMAkV7OtwuqBVzrE8GR6GFx+wExME=
